@@ -179,7 +179,7 @@ program sinpa
           vv0 = ((cos(alphas(ialpha))*u3 + sin(alphas(ialpha))*u1) * cos(beta) &
                  + sin(beta)*u2) * v0
           ! Initiallise the marker
-          part%weight         = sin(beta)
+          part%weight         = abs(sin(beta))
           part%position(:, :) = 0.0
           part%velocity(:, :) = 0.0
           part%position(:,1) = r0
@@ -250,12 +250,12 @@ program sinpa
               call minimumDistanceLines(r0, vv0/v0, nbi%p0, nbi%u, dMin, posMin)
               ! Store the information of the marker
               MappingData(1:3, cScintillator ) = part%collision_point2 ! f point
-              MappingData(4:6,cScintillator) = posMin   ! Initial point (NBI)
-              MappingData(7:9,cScintillator) = vv0  ! Initial velocity
-              MappingData(10, cScintillator) = dMin ! Closer distance to NBI
-              MappingData(11, cScintillator) = beta ! Beta angle
-              MappingData(12:14, cScintillator) = part%collision_point1 ! Ionization point
-              MappingData(15, cScintillator) = part%weight ! weight
+              MappingData(4, cScintillator) = part%weight ! weight
+              MappingData(5:7,cScintillator) = posMin   ! Initial point (NBI)
+              MappingData(8:10,cScintillator) = vv0  ! Initial velocity
+              MappingData(11, cScintillator) = dMin ! Closer distance to NBI
+              MappingData(12, cScintillator) = beta ! Beta angle
+              MappingData(13:15, cScintillator) = part%collision_point1 ! Ionization point
               MappingData(16:18, cScintillator ) = &
                 MATMUL(rotation, part%collision_point2 - ps)
 
@@ -300,19 +300,19 @@ program sinpa
         StrikeMap(1, ialpha + (irl - 1) * nAlpha) = rL(irl)
         StrikeMap(2, ialpha + (irl - 1) * nAlpha) = alphas(ialpha)
         StrikeMap(3, ialpha + (irl - 1) * nAlpha) = &   ! Strike point at Scint
-          sum(MappingData(:, 1)) / cScintillator
+          sum(MappingData(:, 16)) / cScintillator
         StrikeMap(4, ialpha + (irl - 1) * nAlpha) = &
-          sum(MappingData(:, 2)) / cScintillator
+          sum(MappingData(:, 17)) / cScintillator
         StrikeMap(5, ialpha + (irl - 1) * nAlpha) = &
-          sum(MappingData(:, 3)) / cScintillator
+          sum(MappingData(:, 18)) / cScintillator
         StrikeMap(6, ialpha + (irl - 1) * nAlpha) = &  ! Birth position (NBI)
-          sum(MappingData(:, 4)) / cScintillator
-        StrikeMap(7, ialpha + (irl - 1) * nAlpha) = &
           sum(MappingData(:, 5)) / cScintillator
-        StrikeMap(8, ialpha + (irl - 1) * nAlpha) = &
+        StrikeMap(7, ialpha + (irl - 1) * nAlpha) = &
           sum(MappingData(:, 6)) / cScintillator
+        StrikeMap(8, ialpha + (irl - 1) * nAlpha) = &
+          sum(MappingData(:, 7)) / cScintillator
         StrikeMap(9, ialpha + (irl - 1) * nAlpha) = &  ! Distance to NBI line
-          sum(MappingData(:, 10)) / cScintillator
+          sum(MappingData(:, 11)) / cScintillator
         StrikeMap(10, ialpha + (irl - 1) * nAlpha) = & ! Collimator factor
           dble(cScintillator) /dble(cEnter)            ! and striking ions
         StrikeMap(11, ialpha + (irl - 1) * nAlpha) = cScintillator

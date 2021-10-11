@@ -1143,7 +1143,7 @@ contains
     NAMELIST /plate_setup_cfg/ geometry_dir
     NAMELIST /plate_files/ scintillator_file, foil_file, collimator_file
     NAMELIST /ExtraGeometryParams/ u1, u2, u3, rHead, pinRadius, ps, rotation
-    geometry_dir = '/afs/ipp-garching.mpg.de/home/r/ruejo/SINPA/Geometry/'
+    geometry_dir = trim(SINPA_dir)//'Geometry/'
 
     ! Read the scintillator:
     call parseGeometry(trim(geometry_dir)//geomID//'/Scintillator.txt', verb, scintillator)
