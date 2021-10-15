@@ -82,6 +82,17 @@ module sinpa_module
     real(8), dimension(:,:,:), allocatable :: Brzt,E ! Fields
   end type fields
 
+  type :: FIDASIM
+        integer(4):: shot_number !< shot number of the performed sim
+        real(4) :: time !< time point of the simulation
+        integer(4) :: nr_npa !< number of NPA markers
+        integer(4) :: counter !< number of markers hitting the detector
+        real(8), dimension(:, :), allocatable :: ipos !< birth position
+        real(8), dimension(:, :), allocatable :: fpos !< pinhole position
+        real(8), dimension(:, :), allocatable :: v !< marker velocity
+        real(8), dimension(:), allocatable :: wght !< weight
+        integer, dimension(:), allocatable :: kind !< kind, active, passive...
+  end type FIDASIM
 
   type :: scatteringData
     ! Sigma for the model of scattering in the carbon foil
@@ -151,7 +162,7 @@ module sinpa_module
   real(8) :: dt !< dt for the time integration, in s
   real(8) :: dtNeutral
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
-  real(8), dimension(:, :), allocatable:: MappingData !< Matrix to store mapping data
+  real(8), dimension(:, :), allocatable:: Strike !< Matrix to store data
   real(8), dimension(:, :), allocatable:: StrikeMap !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: CollimatorStrikes !< Matrix to store the strike map
   real(8), dimension(3,3):: rotation !< Rotation matrix
@@ -174,6 +185,8 @@ module sinpa_module
   character (len=1000) :: ScintillatorFile !< Scintillator file
   character (len=1000) :: input_filename !< Scintillator file
   character (len=1000) :: SINPA_dir !< root directory of SINPA
+  character (len=1000) :: FIDASIMfolder !< root directory of SINPA
+
   ! --- Counters
   integer:: cEnter !< Number of mapping markers which enter
   integer:: cCollimator !< Number of markers impinging the collimator
@@ -182,11 +195,12 @@ module sinpa_module
   integer:: cScintillator !< Number of markers colliding with the scintillator, for each alpha
   integer:: cFoil !< Number of markers colliding with the foil, for each alpha
   integer:: cOrb = 0!< Number of saved orbits
-
+  ! --- Signal
+  type(FIDASIM):: F4Markers !< FIDASIM4 markers
 
   ! --- Others
   integer:: ierr !< error management
-  integer:: irl, ialpha, imc, istep, iistep!< dummy for loops
+  integer:: irl, ialpha, imc, istep, iistep, i!< dummy for loops
   real(8), dimension(3) :: rHeadCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
@@ -219,7 +233,8 @@ module sinpa_module
 
   ! Namelist
   NAMELIST /config/ runID, geomID, nAlpha, nGyroradius, nMap, mapping,&
-    signal, resampling, nResampling, saveOrbits, saveRatio, SINPA_dir, verbose
+    signal, resampling, nResampling, saveOrbits, saveRatio, SINPA_dir,&
+    FIDASIMfolder, verbose
 
   ! --- Input
   integer:: nGyro !< number of points in a complete gyrocicle of the particle
@@ -490,8 +505,8 @@ contains
 
     ! Open the file and read:
     open(60, file=filename, form = 'formatted', status='old', action='read')
-    read(50, NML=nbi_namelist)
-    close(50)
+    read(60, NML=nbi_namelist)
+    close(60)
     nbi%p0 = p0
     nbi%u = u
     nbi%npoints = npoints
@@ -524,7 +539,7 @@ contains
   !   p = nbi%points(:, i)
   ! end subroutine getNBIpoint
 
-  subroutine minimumDistanceLines(p, w, r, u_local, d_local, point)
+  subroutine minimumDistanceLines(p, v, r, w, d_local, point)
     ! -------------------------------------------------------------------------
     ! Get the minimum distance between two lines
     !
@@ -536,25 +551,25 @@ contains
 
     ! Dummy variables
     real(8), dimension(3), intent(in) :: p !< Point in line 1 (x, y, z)
-    real(8), dimension(3), intent(in) :: w !< unit vector line 1
+    real(8), dimension(3), intent(in) :: v !< unit vector line 1
     real(8), dimension(3), intent(in) :: r !< Point in line 2 (x, y, z)
-    real(8), dimension(3), intent(in) :: u_local !< unit vector line 2
+    real(8), dimension(3), intent(in) :: w !< unit vector line 2
 
     real(8), intent(out) :: d_local !< minimum distace
     real(8), dimension(3), intent(out) :: point !< Point in line 1 closer to line 2
 
     ! Auxiliar variables
-    real(8):: alpha, eta, theta   ! Please see SINPA documentation
-    real(8), dimension(3):: beta_local ! Point in line 1 closer to line 2
+    real(8):: alpha, beta, gamma   ! Please see SINPA documentation
+    real(8), dimension(3):: d0 ! Point in line 1 closer to line 2
     ! Calculate auxiliar quantities
     alpha = sum((p - r) * w)
-    eta = sum((p - r) * u_local)
-    theta = sum(u_local * w)
-    beta_local = (p - r) + (theta * eta - alpha)/(1-theta**2)*w &
-      + (theta*alpha - eta)/(1-theta**2)*u
+    beta = sum((p - r) * v)
+    gamma = sum(v * w)
+    d0 = (p - r) + ((beta - alpha*gamma)*v &
+      + (alpha - gamma*beta)*w)/(gamma**2-1)
     ! Calculate the minimum distance
-    d_local = sqrt(beta_local(1)**2 + beta_local(2)**2 + beta_local(3)**2)
-    point = p + (theta * eta - alpha)/(1-theta**2)*w
+    d_local = sqrt(d0(1)**2 + d0(2)**2 + d0(3)**2)
+    point = p + (beta - gamma * alpha)/(gamma**2-1)*v
   end subroutine minimumDistanceLines
 !------------------------------------------------------------------------------
 ! SECTION 3: COEFFICIENTS FOR INTERPOLATORS
@@ -1157,8 +1172,44 @@ contains
     ! Read the pinhole system
     open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
     read(60, NML=ExtraGeometryParams, iostat=ierr)
-    print*, rotation
     close(60)
   end subroutine readGeometry
 
+!------------------------------------------------------------------------------
+! SECTION 7: FIDASIM compatibility
+!------------------------------------------------------------------------------
+  subroutine readFIDASIM4Markers(filename)
+    ! Dummy variables:
+    character (*) :: filename !< Name of the file with the markers
+    ! Local variables:
+    real(4), dimension(:), allocatable:: dummy1D
+    real(4), dimension(:, :), allocatable:: dummy2D
+    print*, 'Reading markers info from: ', trim(filename)
+    open(60, file=trim(filename), action='read',access='stream')
+    read(60) F4Markers%shot_number
+    read(60) F4Markers%time
+    read(60) F4Markers%nr_npa
+    read(60) F4Markers%counter
+
+    ! Read the initial position
+    allocate(dummy2D(F4Markers%counter, 3))
+    allocate(F4Markers%ipos(3, F4Markers%counter))
+    allocate(F4Markers%fpos(3, F4Markers%counter))
+    allocate(F4Markers%v(3, F4Markers%counter))
+    allocate(dummy1D(F4Markers%counter))
+    allocate(F4Markers%wght(F4Markers%counter))
+    allocate(F4Markers%kind(F4Markers%counter))
+    read(60) dummy2D
+    F4Markers%ipos = transpose(dble(dummy2D))
+    read(60) dummy2D
+    F4Markers%fpos = transpose(dble(dummy2D))
+    read(60) dummy2D
+    F4Markers%v = transpose(dble(dummy2D))
+    read(60) dummy1D
+    F4Markers%wght = dble(dummy1D)
+    read(60) dummy1D
+    F4Markers%kind = int(dummy1D)
+    print*, F4Markers%counter, 'markers to be follwed'
+
+  end subroutine readFIDASIM4Markers
 end module sinpa_module
