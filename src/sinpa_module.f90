@@ -25,8 +25,8 @@ module sinpa_module
   !----------------------------------------------------------------------------
   ! PARAMETERS
   !----------------------------------------------------------------------------
-  integer, parameter:: versionID1 = 0
-  integer, parameter:: versionid2 = 0
+  integer, parameter:: versionID1 = 0  !< ID version number, to identify ouput
+  integer, parameter:: versionid2 = 0  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -37,41 +37,36 @@ module sinpa_module
   ! ABSTRACT CLASS FOR THE GEOMETRY ELEMENTS
   !> \brief Class with plate geometry.
   type :: geom_element
-      character (len=200) :: name  !< Name of the element
+      character (len=50) :: name   !< Name of the element
       integer :: triangleNum       !< Number of triangles
-      real(8), allocatable :: triangles(:,:,:)
+      integer :: kind              !< Kind of plate, 0=coll, 1=foil, 2=scint
+      real(8), allocatable :: triangles(:,:,:)  !< Triangle data
   end type geom_element
 
-
+  ! ABSTRACT CLASS FOR THE MC MARKERS
+  ! >\brief Class with the marker information
   type :: marker
       !------------------------------------------------------------------------
       ! --- Particle structure
       !------------------------------------------------------------------------
-      ! Note, it has two collision steps becuase markers can collide with the
-      ! carbon foil (ionization point) and then with the scintillator.
-      ! If just coll_step1 is used is because the particle is stoped at the
-      ! collimator
-      integer :: n_t    ! Number of integration steps
-      integer :: coll_step1=0 ! Integration step where the particles collide 1
-      integer :: coll_step2=0 ! Integration step where the particles collide 1
-      real (8), dimension(:,:), allocatable:: position ! in cm
-      real (8), dimension(:,:), allocatable:: velocity ! in cm/s
-      real (8):: weight  ! Weight of the markers, [part/s/cm^2 of pinhole]
-      real (8):: type    ! Marker type: identify if is active or passive, follows FIDASIM criteria
-      logical :: collision1 = .FALSE. ! Decide if particle has collided one time
-      real (8), dimension(3) :: collision_point1 ! in cm
-      logical :: collision2 = .FALSE.  ! Decide if particle has collided a second time
-      real (8), dimension(3) :: collision_point2 ! in cm
-      character (len=30) :: collided_with ! Name of the plate
-      ! real (8):: Z ! in |e|
-      real (8):: qm ! in |e|
+      integer :: n_t    !< Number of integration steps
+      real (8), dimension(:,:), allocatable:: position !< Particle position in cm
+      real (8), dimension(:,:), allocatable:: velocity !< Particle velocity in cm/s
+      real (8):: weight  !< Weight of the markers, [part/s/cm^2 of pinhole, for FIDASIM, in au, for mapping]
+      real (8):: type    !< Marker type: identify if is active or passive, follows FIDASIM criteria
+      logical :: collision = .FALSE. !< Flag for the collision
+      real (8), dimension(3) :: collision_point !< Point of collision in cm
+      real (8):: qm !< q over m, SI
       ! For the mapping
-      real (8):: alpha  ! alpha angle, radians
-      real (8):: beta  ! beta angle, radians
-      real (8):: dt ! dt for the integration [s]
+      real (8):: xi  !< xi angle (or pitch for FILD), radians
+      real (8):: beta  !< beta angle (or Gyrophase for FILD), radians
+      ! Integration
+      real (8):: dt !< dt for the integration [s]
+      integer::kindOfCollision ! With whom has collide
   end type marker
 
-
+  ! ABSTRACT CLASS FOR THE FIELDS
+  ! >/briefg
   type :: fields
     integer :: nr                 ! Size of the grid in the r dimension
     integer :: nz                 ! Size of the grid in the z dimension
@@ -140,6 +135,17 @@ module sinpa_module
     real(8)::dx                     !< Difference between consecutive points.
   end type grid_class
 
+  !> \brief Contains the reference system in the pinhole
+  type :: pinhole_system_type
+    real(8), dimension(3):: rPin  !< Position of the pinhole (cm)
+    integer:: kind  !< kind of pinhole (circle, 0) (rectangle, 1)
+    real(8):: d1 ! Pinhole radius, or size along u1 (in cm)
+    real(8):: d2 ! Pinhole radius, or size along u2 (in cm)
+    real(8), dimension(3):: r  !< Position of the pinhole (cm)
+    real(8), dimension(3):: u1  !< Vector in the pinhole plane 1
+    real(8), dimension(3):: u2  !< vector in the pinhole plane 2
+    real(8), dimension(3):: u3  !< normal to the pinhole
+  end type pinhole_system_type
   ! ---------------------------------------------------------------------------
   ! Interfaces
   ! ---------------------------------------------------------------------------
@@ -177,7 +183,8 @@ module sinpa_module
   type(grid_class), protected:: gzz  !< Grid classes to store the Z grid
   type(grid_class), protected:: gphi !< Grid classes to store the phi grid
   ! --- Geometry structures
-  type(geom_element) :: foil, collimator, scintillator
+  type(geom_element), dimension (:), allocatable:: geometry
+  type(geom_element) :: scintillator, foil, collimator
   ! --- FileNames and paths
   character (len=1000) :: BFieldFile !< Magnetic field file
   character (len=1000) :: CollimatorFile !< Collimator file
@@ -188,7 +195,6 @@ module sinpa_module
   character (len=1000) :: FIDASIMfolder !< root directory of SINPA
 
   ! --- Counters
-  integer:: cEnter !< Number of mapping markers which enter
   integer:: cCollimator !< Number of markers impinging the collimator
   integer:: cWrongNeutral !< Number of markers not colliding with the collimator neither carbon foil
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
@@ -201,18 +207,19 @@ module sinpa_module
   ! --- Others
   integer:: ierr !< error management
   integer:: irl, ialpha, imc, istep, iistep, i!< dummy for loops
-  real(8), dimension(3) :: rHeadCyl  !< position of the pingole (r,p,z)
+  real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
   real(8) :: v0  !< initial velocity for mapping markers
   real(8), dimension(3) :: r0  !< initial position for mapping markers
   real(8), dimension(3) :: vv0  !< initial velocity for mapping markers
   real(8), dimension(3) :: ran  !< Set of random numbers
+  real(8), dimension(:, :), allocatable:: random_numbers  !< Set of random numbers
   real(8) :: rand_number  !< Set of random numbers
   real(8) :: beta  !< random angle for the markers
   real(8) :: dMin  !< minimum distance to NBI of markers trajectories
   real(8), dimension(3) :: posMin  !< position to minimum distance to NBI of the mapping marker
-
+  type(pinhole_system_type) :: pinhole !< pinhole definition
 
   ! ---------------------------------------------------------------------------
   ! NAMELIST
@@ -220,7 +227,9 @@ module sinpa_module
   ! Dummy variables for the namelist
   character (len=50) :: runID !< runID
   character (len=50) :: geomID !< geometryID
-  integer:: nAlpha !< number of pitches (R) to simulate
+  logical:: FILDSIMmode !< Flag to use FILDSIM mode or not
+  integer:: nGeomElements !< Number of geometrical elements
+  integer:: nxi !< number of pitches (R) to simulate
   integer:: nGyroradius !< number of energies (gyroradius) to simulate
   integer:: nMap !< number of markers per energy-pitch for the map
   logical:: mapping !< flag to decide if we launch mapping markers
@@ -230,34 +239,35 @@ module sinpa_module
   logical:: saveOrbits !< flag to decide if we save the orbits
   real(8) :: saveRatio !< Ratio of orbits to be saved
   logical:: verbose !< Print information of the run
+  real(8) :: M !< Mass of the particle, in amu
+  real(8) :: Zin !< Initial chargeof the particle, in |e|
+  real(8) :: Zout !< Charge after ionization, in |e|
 
   ! Namelist
-  NAMELIST /config/ runID, geomID, nAlpha, nGyroradius, nMap, mapping,&
+  NAMELIST /config/ runID, geomID, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
+    nMap, mapping,&
     signal, resampling, nResampling, saveOrbits, saveRatio, SINPA_dir,&
-    FIDASIMfolder, verbose
+    FIDASIMfolder, verbose, M, Zin, Zout
 
   ! --- Input
   integer:: nGyro !< number of points in a complete gyrocicle of the particle
 
-  real(8) :: beta0  !< collimator vertical acceptance
+  real(8) :: minAngle  !< collimator vertical acceptance
+  real(8) :: dAngle  !< collimator vertical acceptance
 
   real(8), dimension(:), allocatable:: alphas
   real(8), dimension(:), allocatable:: rL !< FILDSIM gyroradius
   real (8):: maxT !< maximum time to follow particles
-  NAMELIST /inputParams/ nGyro, beta0, alphas, rL, maxT
+  NAMELIST /inputParams/ nGyro, minAngle, dAngle, alphas, rL, maxT
 
   ! --- Mapping orientation
   real(8) :: pinRadius  !< Radius of the head
-  real(8), dimension(3) :: rHead  !< poisition of the pinhole (x,y,z)
+  real(8), dimension(3) :: rPin  !< poisition of the pinhole (x,y,z)
   real(8), dimension(3) :: u3  !< normal in the pinhole
   real(8), dimension(3) :: u1  !< tangent to the pinhole
   real(8), dimension(3) :: u2  !< second tangent in the pinhole
 
   ! --- Particle and foil parameters
-  real(8) :: M !< Mass of the particle, in amu
-  real(8) :: Zin !< Initial chargeof the particle, in |e|
-  real(8) :: Zout !< Charge after ionization, in |e|
-
   logical:: energyLoss !< Apply energy loss
   real(8) :: a_SRIM !< First coefficient of SRIM energy loss model
   real(8) :: b_SRIM !< Second coefficient of SRIM energy loss model
@@ -268,7 +278,7 @@ module sinpa_module
   real(8) :: geometricTrans !< Mesh geometric transmission factor
   logical :: scattering !< apply scatering in the foil
   ! Namelist
-  NAMELIST /particlesFoil/ M, Zin, Zout, energyLoss, a_SRIM, b_SRIM, weightChange, &
+  NAMELIST /markerinteractions/ energyLoss, a_SRIM, b_SRIM, weightChange, &
     a_ionization, b_ionization, c_ionization, geometricTrans, scattering
 
   ! --- NBI namelist
@@ -975,6 +985,32 @@ contains
     end do
   end subroutine triangleRay
 
+  subroutine checkCollision(particle)
+    type(marker), intent(inout):: particle
+    integer::iloop
+    if (particle%kindOfCollision .eq. 1) then
+      ! We already collided with the foil, check just the scintillator, which is
+      ! supposed to be the last element of the geometry array
+      call triangleRay(geometry(nGeomElements)%triangleNum, geometry(nGeomElements)%triangles, &
+                       particle%position(:, istep), particle%position(:, istep + 1), &
+                       particle%collision, particle%collision_point)
+      if (particle%collision) then
+        particle%kindOfCollision = geometry(nGeomElements)%kind
+      endif
+    else   ! We need to loop over all the plates
+      plates: do iloop=1, nGeomElements
+        call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
+                         particle%position(:, istep), particle%position(:, istep + 1), &
+                         particle%collision, particle%collision_point)
+        if (part%collision) then
+          particle%kindOfCollision = geometry(iloop)%kind
+          exit plates
+        endif
+      enddo plates
+    endif
+  end subroutine checkCollision
+
+
   subroutine pushParticle(qm, r0, v0, r1, v1, dt)
     ! ----------------------------------------------------------------------------
     ! BORIS LEAP-FROG INTEGRATOR: evolve the position and velocity of the particle
@@ -1092,12 +1128,17 @@ contains
     type(geom_element), intent(out) :: g_element  !< class with the triangle geometry
     ! Local variables
     real(8), allocatable :: buffer(:,:)
+    character(len = 80) :: line
     integer :: ii
     ! ---------------------
     ! Read the file
     print*, 'reading: ', filename
     open(unit = 60, file = filename, form = 'formatted', status='old', action='read')
-    read(60,*) g_element%triangleNum
+    read(60, *) g_element%name
+    read(60, *) line  ! Dummy descritption name
+    read(60, *) line  ! Dummy description line
+    read(60, *) g_element%kind
+    read(60, *) g_element%triangleNum
 
     ! Allocate space for the triangle file:
     if(verb) PRINT*, 'Reading triangle structure. #triangle = ', g_element%triangleNum
@@ -1110,6 +1151,8 @@ contains
     allocate(g_element%triangles(g_element%triangleNum, 3, 3))
 
     if(verb)then
+      print*, 'Name: ', g_element%name
+      print*, 'Kind: ', g_element%kind
       print*, 'Processing the triangles into 2-vector-and-point structure.'
     end if
     ! The buffer will contain a raw copy of the triangles. We have to convert them
@@ -1131,48 +1174,68 @@ contains
       g_element%triangles(ii, 3, 3) = buffer(3, 3*(ii-1)+1)
     end do
 
-    if(verb) print*, 'Triangle preprocessed!'
+    if(verb) then
+      print*, 'Triangle preprocessed!'
+      print*, '---'
+    endif
     deallocate(buffer)
   end subroutine parseGeometry
 
-  subroutine readGeometry(geomID, scintillator, collimator, foil, verb, u1, u2,&
-                          u3,rHead,pinRadius)
+  subroutine readGeometry(geomID, n, verb)
+    ! Read the Geometry files. Note: No more than 9 files can be read. I could
+    ! easily avoid this, but, are you going to define more than 9  geometric
+    ! files??
     implicit none
     ! Dummy variables
-    ! @ToDo, solve the geometry element
     character (len=*), intent(in) :: geomID
-    type(geom_element), intent(out) :: scintillator, collimator, foil
-    real(8), dimension(3), intent(out) :: u1, u2, u3, rHead
-    real(8), intent(out) :: pinRadius
+    integer, intent(in) :: n
+
 
     logical, intent(in):: verb !< Write to console some info.
 
     ! Local variables
     integer :: kk,ll
     real (8), dimension(3):: vector1,vector2
-    integer:: ierr
-    character (len=1000) :: scintillator_file, collimator_file, foil_file
+    integer:: ierr, pinholeKind
+    real(8), dimension(3) :: u1, u2, u3, rPin
+    real(8) :: d1, d2
     character (len=1000) :: dummy_string, err_str, geometry_dir
+    character (len=1) :: number
+
 
     ! Read namelist and configure the plates
-    NAMELIST /plate_setup_cfg/ geometry_dir
-    NAMELIST /plate_files/ scintillator_file, foil_file, collimator_file
-    NAMELIST /ExtraGeometryParams/ u1, u2, u3, rHead, pinRadius, ps, rotation
+    NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, rotation, pinholeKind
+
+    ! Read the files
     geometry_dir = trim(SINPA_dir)//'Geometry/'
 
-    ! Read the scintillator:
-    call parseGeometry(trim(geometry_dir)//geomID//'/Scintillator.txt', verb, scintillator)
-    scintillator%name = 'scintillator'
-    ! Read the foil
-    call parseGeometry(trim(geometry_dir)//geomID//'/Foil.txt', verb, foil)
-    foil%name = 'foil'
-    ! Read the collimator
-    call parseGeometry(trim(geometry_dir)//geomID//'/Collimator.txt', verb, collimator)
-    collimator%name = 'collimator'
+    ! read the plates
+    allocate(geometry(n))
+    do i = 1,n
+      write(number, '(I1)') i
+      dummy_string = trim(geometry_dir)//geomID//'/Element'//number//'.txt'
+      call parseGeometry(trim(dummy_string),verb, geometry(i))
+    enddo
     ! Read the pinhole system
     open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
+    ! Fill the pinhole object
+    pinhole%u1 = u1
+    pinhole%u2 = u2
+    pinhole%u3 = u3
+    pinhole%r = rPin
+    pinhole%d1 = d1
+    pinhole%d2 = d2
+    pinhole%kind = pinholeKind
+    if (verb) then
+      print*, 'Pinhole position', pinhole%r
+      print*, 'Pinhole u1', pinhole%u1
+      print*, 'Pinhole u2', pinhole%u2
+      print*, 'Pinhole u3', pinhole%u3
+      print*, 'Pinhole d1', pinhole%d1
+      print*, 'Pinhole d2', pinhole%d2
+    endif
   end subroutine readGeometry
 
 !------------------------------------------------------------------------------
@@ -1210,6 +1273,54 @@ contains
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
     print*, F4Markers%counter, 'markers to be follwed'
-
   end subroutine readFIDASIM4Markers
+
+ !------------------------------------------------------------------------------
+ ! SECTION 8: Initialization of markers
+ !------------------------------------------------------------------------------
+ subroutine initMarker(index, vmod, dt_initial, xi)
+   !----
+   integer, intent(in):: index
+   real(8), intent(in):: vmod
+   real(8), intent(in):: dt_initial
+   real(8), intent(in):: xi
+   !---
+   real(8):: distance
+   ! Clean the marker position and trajectory
+   part%position(:, :) = 0.0d0
+   part%velocity(:, :) = 0.0d0
+   part%collision    = .False.
+   part%kindOfCollision = 9  ! Just initialise it to a dummy value
+   part%dt = dt_initial
+   part%qm    = Zin *qe / M /amu_to_kg
+   part%xi = xi
+
+   ! Init the marker position
+   distance = 1000.0
+   if (pinhole%kind.eq.0) then
+      do while (distance.gt.pinhole%d1)
+        call random_number(ran)
+        part%position(:, 1) = pinhole%r + &
+          pinhole%d1 * ((-1+2*ran(1))*pinhole%u1 + &
+                        (-1+2*ran(2))*pinhole%u2)
+        distance = sqrt(sum((part%position(:, 1) - pinhole%r)**2))
+      enddo
+    else
+      part%position(:, 1) = rPin + &
+          pinhole%d1 * (-1+2*ran(1))*pinhole%u1 + &
+          pinhole%d2 * (-1+2*ran(2))*pinhole%u2
+    endif
+    ! Initialise the random angle
+    part%beta = minAngle + dAngle*ran(3)
+    ! Init marker velocity
+    if (FILDSIMmode) then
+      print*, 'no implemented'
+    else
+      part%velocity(:, 1) = ((cos(xi)*pinhole%u3 + &
+                              sin(xi)*pinhole%u1) * cos(part%beta) &
+                           + sin(part%beta)*pinhole%u2) * vmod
+
+      part%weight         = abs(sin(part%beta))
+    endif
+ end subroutine initMarker
 end module sinpa_module

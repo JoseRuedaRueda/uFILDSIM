@@ -3,7 +3,7 @@
   rHead(1) = 186.8     ! Position of the pinhole XYZ
   rHead(2) = -12.9
   rHead(3) = 96.2
-  pinRadius = 0.14  ! Pinhole radius, in cm
+  pinRadius = 0.15  ! Pinhole radius, in cm
 
   ! Unitary vectors:
   u1(1) =  0.6172134  ! Parallel to the top collimator face

@@ -1,0 +1,42 @@
+&ExtraGeometryParams   ! Namelist with the extra geometric parameters
+  ! Pinhole
+  rPin(1) = 186.79875988,        ! Position of the pinhole XYZ
+  rPin(2) = -12.89792957,
+  rPin(3) = 96.19944222,
+  pinholeKind = 0     ! 0 = Circular, 1 = rectangle
+  d1 = 0.15  ! Pinhole radius, or size along u1 (in cm)
+  d2 = 0.0   ! Size along u2, not used if we have a circular pinhole
+
+  ! Unitary vectors:
+  u1(1) =  0.6172134  ! Parallel to the top collimator face
+  u1(2) = -0.77151675
+  u1(3) =  0.15430335
+
+  u2(1) = -0.72834974, ! Normal to the top collimator face
+  u2(2) = -0.48609428
+  u2(3) =  0.48292754
+
+  u3(1) = -0.29758071   ! Normal to the pinhole plane
+  u3(2) = -0.41045615
+  u3(3) = -0.86195793
+
+  ! Reference system of the Scintillator:
+  ps(1) = 188.45682998
+  ps(2) = -13.24027367
+  ps(3) = 98.04494353
+
+  !usn(1) = 0.57924729 ! Normal to the scintillator, actually not used in
+  !usn(2) =  -0.06030532 ! the fortran code, but in the python routines
+  !usn(3) = 0.8129181
+
+  rotation(1,1) = -0.57924729
+  rotation(1,2) = 0.06030532
+  rotation(1,3) = -0.8129181
+  rotation(2,1) = -0.06030532
+  rotation(2,2) = 0.99135661
+  rotation(2,3) = 0.1165133
+  rotation(3,1) = 0.8129181
+  rotation(3,2) = 0.1165133
+  rotation(3,3) = -0.5706039
+
+/
