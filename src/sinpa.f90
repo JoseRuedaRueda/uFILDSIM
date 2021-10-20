@@ -296,161 +296,125 @@ program sinpa
   ! ROUND 3: FIDASIM signal
   !=============================================================================
   !-----------------------------------------------------------------------------
-  ! signal_part: if (signal) then
-  !   ! Fist load the FIDASIM simulation
-  !   call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin")
-  !   ! --- Open the file to save the data
-  !   ! -- Strike points on the scintillator
-  !   open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-  !        '/results/SignalStrikePoints.bin', access = 'stream', action='write')
-  !   ! Save the header of the file
-  !   write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, 15
-  !   ! -- Strike points on the collimator
-  !   open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-  !        '/results/SignalCollimatorStrikePoints.bin', access = 'stream', action='write')
-  !   write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0,4
-  !   ! -- File to save the orbits
-  !   if (saveOrbits) then
-  !     open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-  !          '/results/SignalOrbits.bin', access = 'stream', action='write')
-  !     write(63) versionID1, versionID2, runID
-  !   endif
-  !   ! --- Allocate the particle:
-  !   call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
-  !   dt = 2 * pi / OmegaPart / nGyro
-  !   part%n_t = int(maxT/dt)
-  !   dtNeutral = 4.0E-7
-  !   if (verbose) then
-  !     print*, part%n_t, 'steps will be performed for each particle'
-  !   endif
-  !   allocate(part%position(3,part%n_t))
-  !   allocate(part%velocity(3,part%n_t))
-  !   ! --- Allocate the necesary matrix
-  !   allocate(Strike(15,F4Markers%counter))            ! Strike points in the scint
-  !   allocate(CollimatorStrikes(4,F4Markers%counter))       ! Strike position on the coll
-  !   ! -- Initialise all the counters
-  !   cScintillator = 0
-  !   cCollimator = 0
-  !   cWrongIons = 0
-  !   cWrongNeutral = 0
-  !   cEnter = 0
-  !   cFoil = 0
-  !   markers: do i=1, F4Markers%counter
-  !     ! Initialise the markers
-  !     part%weight         = F4Markers%wght(i)
-  !     part%position(:, :) = 0.0d0
-  !     part%velocity(:, :) = 0.0d0
-  !     part%position(:,1) = F4Markers%fpos(:, i)
-  !     part%velocity(:,1) = F4Markers%v(:, i)
-  !     part%collision1     = .False.
-  !     part%collision2     = .False.
-  !     part%dt    = dtNeutral
-  !     part%qm    = Zin *qe / M /amu_to_kg
-  !     ! -- Collimator and carbon foil evolution
-  !     ! The neutral dt is quite large, so do a maximum of 10 steps, if
-  !     ! there is not collision for that, there is a problem
-  !     signal_neutral: do istep = 1, 10
-  !       ! Push the particle
-  !       call pushParticle(part%qm, part%position(:, istep), &
-  !                         part%velocity(:, istep), &
-  !                         part%position(:, istep + 1),&
-  !                         part%velocity(:, istep + 1), part%dt)
-  !       ! Check collision with the collimator
-  !       call triangleRay(collimator%triangleNum, collimator%triangles, &
-  !                        part%position(:, istep), part%position(:, istep + 1), &
-  !                        part%collision1, part%collision_point1)
-  !       ! if collide with the collimator, there is not much to be done:
-  !       if (part%collision1) then
-  !           cCollimator = cCollimator + 1
-  !           CollimatorStrikes(1:3, cCollimator) = part%collision_point1
-  !           CollimatorStrikes(4, cCollimator) = part%weight
-  !           if (saveOrbits) then
-  !             call random_number(rand_number)
-  !             if (rand_number .lt. saveRatio) then
-  !               cOrb = cOrb + 1
-  !               write(63) istep
-  !               write(63) transpose(part%position(:, 1:istep))
-  !             endif
-  !           endif
-  !           cycle markers
-  !       endif
-  !       ! Check collision with the foil
-  !       call triangleRay(foil%triangleNum, foil%triangles, &
-  !                        part%position(:, istep), part%position(:, istep + 1), &
-  !                        part%collision1, part%collision_point1)
-  !       ! if the particle collided, this loops need to end
-  !       if (part%collision1) then
-  !         ! Update particle variables
-  !         part%dt = dt   ! Good dt to evolve an ion
-  !         part%qm = Zout *qe / M /amu_to_kg ! New charge after the foil
-  !         part%position(:, istep + 1) = part%collision_point1
-  !         cFoil = cFoil + 1 ! Update the counter
-  !         iistep = istep ! Save the step to eneter in the next loop
-  !         if (saveOrbits) then
-  !           call random_number(rand_number)
-  !           if (rand_number .lt. saveRatio) then
-  !             cOrb = cOrb + 1
-  !             write(63) istep
-  !             write(63) transpose(part%position(:, 1:istep))
-  !           endif
-  !         endif
-  !         exit signal_neutral
-  !       endif
-  !     enddo signal_neutral
-  !     ! If there is no collision, we got a problem
-  !     if (.not. part%collision1) then
-  !         ! ToDo Save fails
-  !         cWrongNeutral = cWrongNeutral + 1
-  !         cycle markers
-  !     end if
-  !     ! Now start the ion tracking part
-  !     signal_charged: do istep = iistep + 1 , part%n_t - 1
-  !       ! Push the particle
-  !       call pushParticle(part%qm, part%position(:, istep), &
-  !                         part%velocity(:, istep), &
-  !                         part%position(:, istep + 1),&
-  !                         part%velocity(:, istep + 1), part%dt)
-  !       ! Check collision with the scintillator
-  !       call triangleRay(scintillator%triangleNum, scintillator%triangles, &
-  !                        part%position(:, istep), part%position(:, istep + 1), &
-  !                        part%collision2, part%collision_point2)
-  !       if (part%collision2) then
-  !         cScintillator = cScintillator + 1 ! Update counter
-  !         Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
-  !         Strike(2:4, cScintillator ) = part%collision_point2 ! f point
-  !         Strike(5:7, cScintillator ) = &
-  !           MATMUL(rotation, part%collision_point2 - ps) !f point in scintillator region
-  !         Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
-  !         Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
-  !         Strike(14,cScintillator) = part%weight ! weight
-  !         Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
-  !
-  !         if (saveOrbits) then
-  !           call random_number(rand_number)
-  !           if (rand_number .lt. saveRatio) then
-  !             cOrb = cOrb + 1
-  !             write(63) istep
-  !             write(63) transpose(part%position(:, 1:istep))
-  !           endif
-  !         endif
-  !         cycle markers
-  !       endif
-  !     enddo signal_charged
-  !   end do markers
-  !   write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
-  !   write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
-  !   if (verbose) then
-  !     print*, '-----'
-  !     print*, 'Hitting Collimator', cCollimator
-  !     print*, 'Hitting Scintillator', cScintillator
-  !     print*, 'Wrong Neutrals', cWrongNeutral
-  !     print*, 'Wrong Ions', cWrongIons
-  !   endif
-  !   close(61)
-  !   close(62)
-  !   deallocate(part%position)
-  !   deallocate(part%velocity)
-  !   deallocate(Strike)
-  !   deallocate(CollimatorStrikes)
-  ! endif signal_part
+  signal_part: if (signal) then
+    ! Fist load the FIDASIM simulation
+    call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin")
+    ! --- Open the file to save the data
+    ! -- Strike points on the scintillator
+    open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+         '/results/SignalStrikePoints.bin', access = 'stream', action='write')
+    ! Save the header of the file
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, 15
+    ! -- Strike points on the collimator
+    open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+         '/results/SignalCollimatorStrikePoints.bin', access = 'stream', action='write')
+    write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0,4
+    ! -- File to save the orbits
+    if (saveOrbits) then
+      open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+           '/results/SignalOrbits.bin', access = 'stream', action='write')
+      write(63) versionID1, versionID2, runID
+    endif
+    ! --- Allocate the particle:
+    call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
+    dt = 2 * pi / OmegaPart / nGyro
+    part%n_t = int(maxT/dt)
+    dtNeutral = 4.0E-7
+    if (verbose) then
+      print*, part%n_t, 'steps will be performed for each particle'
+    endif
+    allocate(part%position(3,part%n_t))
+    allocate(part%velocity(3,part%n_t))
+    ! --- Allocate the necesary matrix
+    allocate(Strike(15,F4Markers%counter))            ! Strike points in the scint
+    allocate(CollimatorStrikes(4,F4Markers%counter))       ! Strike position on the coll
+    ! -- Initialise all the counters
+    cScintillator = 0
+    cCollimator = 0
+    cWrongIons = 0
+    cWrongNeutral = 0
+    cFoil = 0
+    markers: do i=1, F4Markers%counter
+      ! Initialise the markers
+      ! - Clean the marker data
+      part%position(:, :) = 0.0d0
+      part%velocity(:, :) = 0.0d0
+      part%collision     = .False.
+      part%kindOfCollision = 9  ! Just initialise it to a dummy value
+      ! - FIDASIM data
+      part%weight         = F4Markers%wght(i)
+      part%position(:,1) = F4Markers%fpos(:, i)
+      part%velocity(:,1) = F4Markers%v(:, i)
+      ! - dt and charge
+      part%dt    = dtNeutral
+      part%qm    = Zin *qe / M /amu_to_kg
+      signal_tracking: do istep = 1, part%n_t-1
+        call pushParticle(part%qm, part%position(:, istep), &
+                          part%velocity(:, istep), &
+                          part%position(:, istep + 1),&
+                          part%velocity(:, istep + 1), part%dt)
+        call checkCollision(part)
+        ! If it has collided, do stuff
+        if (part%collision) then
+          if (part%kindOfCollision .eq. 0) then
+            ! Collided with the collimator, dead marker
+            cCollimator = cCollimator + 1
+            CollimatorStrikes(1:3, cCollimator) = part%collision_point
+            CollimatorStrikes(4, cCollimator) = part%weight
+            cycle markers
+            if (saveOrbits) then
+              call random_number(rand_number)
+              if (rand_number .lt. saveRatio) then
+                cOrb = cOrb + 1
+                write(63) istep
+                write(63) transpose(part%position(:, 1:istep))
+              endif
+            endif
+          elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+            cScintillator = cScintillator + 1 ! Update counter
+            Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
+            Strike(2:4, cScintillator ) = part%collision_point ! f point
+            Strike(5:7, cScintillator ) = &
+              MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
+            Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
+            Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
+            Strike(14,cScintillator) = part%weight ! weight
+            Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
+            if (saveOrbits) then
+              call random_number(rand_number)
+              if (rand_number .lt. saveRatio) then
+                cOrb = cOrb + 1
+                write(63) istep
+                write(63) transpose(part%position(:, 1:istep))
+              endif
+            endif
+            cycle markers
+          else ! we collided with the foil
+            part%collision = .False.
+            part%dt = dt   ! Good dt to evolve an ion
+            part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
+            part%position(:, istep + 1) = part%collision_point
+            r0 = part%collision_point
+            cFoil = cFoil + 1 ! Update the counter
+          endif
+        endif
+      enddo signal_tracking
+    end do markers
+    write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
+    write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+    if (verbose) then
+      print*, '-----'
+      print*, 'Hitting Collimator', cCollimator
+      print*, 'Hitting Scintillator', cScintillator
+      print*, 'Wrong Neutrals', cWrongNeutral
+      print*, 'Wrong Ions', cWrongIons
+      print*, 'hitting foil', cFoil
+    endif
+    close(61)
+    close(62)
+    deallocate(part%position)
+    deallocate(part%velocity)
+    deallocate(Strike)
+    deallocate(CollimatorStrikes)
+  endif signal_part
 end program sinpa
