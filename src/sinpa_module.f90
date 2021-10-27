@@ -145,14 +145,18 @@ module sinpa_module
     real(8), dimension(3):: u1  !< Vector in the pinhole plane 1
     real(8), dimension(3):: u2  !< vector in the pinhole plane 2
     real(8), dimension(3):: u3  !< normal to the pinhole
+
+    real(8), dimension(3):: e1  !< Normal to the B field at pinhole 1
+    real(8), dimension(3):: e2  !< Normal to the B field at pinhole 2
+    real(8), dimension(3):: e3  !< Parallel to the B field at pinhole
   end type pinhole_system_type
   ! ---------------------------------------------------------------------------
   ! Interfaces
   ! ---------------------------------------------------------------------------
   abstract interface
-    subroutine interpolateField_interface(rq, zq, phiq,out)
+    subroutine interpolateField_interface(rq, zq, phiq, tq, out)
       implicit none
-      real(kind=8), intent(in)::rq, zq, phiq! Query points in all directions.
+      real(kind=8), intent(in)::rq, zq, phiq, tq! Query points in all directions.
       real(kind=8), intent(out)::out(3) ! Br, Bz, Bphi
     end subroutine interpolateField_interface
   end interface
@@ -175,13 +179,15 @@ module sinpa_module
   real(8), dimension(3):: ps !< reference point in the scintillator
 
   ! --- Magnetic field
-  real(8), dimension(:, :, :), allocatable, protected::Brfield    !< Radial magnetic field.
-  real(8), dimension(:, :, :), allocatable, protected::Bzfield    !< Vertical magnetic field.
-  real(8), dimension(:, :, :), allocatable, protected::Bphifield  !< Toroidal magnetic field.
+  real(8), dimension(:, :, :, :), allocatable, protected::Brfield    !< Radial magnetic field.
+  real(8), dimension(:, :, :, :), allocatable, protected::Bzfield    !< Vertical magnetic field.
+  real(8), dimension(:, :, :, :), allocatable, protected::Bphifield  !< Toroidal magnetic field.
   ! --- grids
   type(grid_class), protected:: grr  !< Grid classes to store the R grid
   type(grid_class), protected:: gzz  !< Grid classes to store the Z grid
   type(grid_class), protected:: gphi !< Grid classes to store the phi grid
+  type(grid_class), protected:: gtt  !< Grid classes to store the t grid
+
   ! --- Geometry structures
   type(geom_element), dimension (:), allocatable:: geometry
   type(geom_element) :: scintillator, foil, collimator
@@ -206,7 +212,7 @@ module sinpa_module
 
   ! --- Others
   integer:: ierr !< error management
-  integer:: irl, ialpha, imc, istep, iistep, i!< dummy for loops
+  integer:: irl, iXI, imc, istep, iistep, i!< dummy for loops
   real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
@@ -220,6 +226,9 @@ module sinpa_module
   real(8) :: dMin  !< minimum distance to NBI of markers trajectories
   real(8), dimension(3) :: posMin  !< position to minimum distance to NBI of the mapping marker
   type(pinhole_system_type) :: pinhole !< pinhole definition
+
+  ! --- FILDSIM mode
+  real(8), dimension(:), allocatable::min_beta, delta_beta
 
   ! ---------------------------------------------------------------------------
   ! NAMELIST
@@ -242,12 +251,13 @@ module sinpa_module
   real(8) :: M !< Mass of the particle, in amu
   real(8) :: Zin !< Initial chargeof the particle, in |e|
   real(8) :: Zout !< Charge after ionization, in |e|
+  integer :: IpBt !< Sign of the magnetic field vs the current
 
   ! Namelist
   NAMELIST /config/ runID, geomID, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
     nMap, mapping,&
     signal, resampling, nResampling, saveOrbits, saveRatio, SINPA_dir,&
-    FIDASIMfolder, verbose, M, Zin, Zout
+    FIDASIMfolder, verbose, M, Zin, Zout, IpBt
 
   ! --- Input
   integer:: nGyro !< number of points in a complete gyrocicle of the particle
@@ -255,10 +265,10 @@ module sinpa_module
   real(8) :: minAngle  !< collimator vertical acceptance
   real(8) :: dAngle  !< collimator vertical acceptance
 
-  real(8), dimension(:), allocatable:: alphas
+  real(8), dimension(:), allocatable:: XI
   real(8), dimension(:), allocatable:: rL !< FILDSIM gyroradius
   real (8):: maxT !< maximum time to follow particles
-  NAMELIST /inputParams/ nGyro, minAngle, dAngle, alphas, rL, maxT
+  NAMELIST /inputParams/ nGyro, minAngle, dAngle, XI, rL, maxT
 
   ! --- Mapping orientation
   real(8) :: pinRadius  !< Radius of the head
@@ -680,7 +690,7 @@ contains
 !------------------------------------------------------------------------------
 ! SECTION 4: MAGNETIC FIELD
 !------------------------------------------------------------------------------
-  subroutine parseField(Bname)
+  subroutine parseField(Bname, verbose_flag)
     !---------------------------------------------------------------------------
     ! This subroutine load the magnetic field
     !
@@ -694,36 +704,42 @@ contains
     implicit none
     ! Dummy variables
     character(len=*), intent(in)::Bname   !< Filename with the magnetic field.
+    logical, intent(in) :: verbose_flag  !< flag to print the information or not
     ! Local variables
-    integer::lr, lz, lphi
+    integer::lr, lz, lphi, ntot
     integer::lr1, lz1, lphi1, ntot1 ! Auxiliar variables to compare the field sizes.
-    real(8)::rmin, rmax, zmin, zmax, phimin, phimax
+    real(8)::rmin, rmax, zmin, zmax, phimin, phimax, timemin, timemax
     integer::send_size, ii
 
     ! Parse de magnetic field
-    print*, 'Parsing the magnetic field...'
+    if (verbose_flag) then
+      print*, 'Parsing the magnetic field...'
+    endif
     open(unit = 60, file=Bname, access='stream', status='old', action='read')
-    read(60) lr, lz, lphi, &
-             rmin, rmax, zmin, zmax, phimin, phimax
-    print*, 'The header of the magnetic field was parsed:'
-    print*, 'RESULTS'
-    print*, 'nr = ', lr, ' nz = ', lz, ' nphi = ', lphi
-    print*, 'INTEGRATION REGION:'
-    print*, 'R = (',rmin, ' , ', rmax, ')'
-    print*, 'z = (',zmin, ' , ', zmax, ')'
-    print*, 'phi = (',phimin, ' , ', phimax, ')'
-    print*, 'Allocating variables... '
-
+    read(60) lr, lz, lphi, ntot, &
+             rmin, rmax, zmin, zmax, phimin, phimax, timemin, timemax
+    if (verbose_flag) then
+      print*, 'The header of the magnetic field was parsed:'
+      print*, 'RESULTS'
+      print*, 'nr = ', lr, ' nz = ', lz, ' nphi = ', lphi, ' ntot = ', ntot
+      print*, 'INTEGRATION REGION:'
+      print*, 'R = (',rmin, ' , ', rmax, ')'
+      print*, 'z = (',zmin, ' , ', zmax, ')'
+      print*, 'phi = (',phimin, ' , ', phimax, ')'
+      print*, 't = (',timemin, ' , ', timemax, ')'
+      print*, 'Allocating variables... '
+    endif
     ! With this, we can allocate all the variables.
-    allocate(Brfield(lr, lphi, lz))
-    allocate(Bzfield(lr, lphi, lz))
-    allocate(Bphifield(lr, lphi, lz))
-    print*, 'Allocated! Reading the magnetic field'
+    allocate(Brfield(lr, lphi, lz, ntot))
+    allocate(Bzfield(lr, lphi, lz, ntot))
+    allocate(Bphifield(lr, lphi, lz, ntot))
+    if (verbose_flag) then
+      print*, 'Allocated! Reading the magnetic field'
+    endif
     read(60) Brfield
     read(60) Bphifield
     read(60) Bzfield
     close(60)
-
     ! Once we read everything, we create the grids:
     call linspace2(rmin, rmax, lr, grr)
     call linspace2(zmin, zmax, lz, gzz)
@@ -739,11 +755,20 @@ contains
     else
       call linspace2(phimin, phimax, lphi, gphi)
     end if
+    if(ntot .eq. 1)then
+        allocate(gtt%data(1))
+        gtt%data = 0.0d0
+        gtt%x0   = 0.0d0
+        gtt%x1   = 1.0d0
+        gtt%size = 1
+        gtt%dx = 1.0d0
+    else
+      call linspace2(timemin, timemax, ntot, gtt)
+    end if
     ! Prepare the interfaces for the field
     if(lr .eq. 1) then  ! We have a uniform
       getField => getField_0D
     elseif(lphi.eq.1)then  ! We have an axisymmetric magnetic field
-      print*, 'We have a 2D field  '
       getField => getField_2D
     else
       getField => getField_3D ! We have an non-axisymmetric magnetic field
@@ -767,7 +792,7 @@ contains
     getField => NULL()
   end subroutine unloadField
 
-  subroutine getField_3D(rq, zq, phiq, out)
+  subroutine getField_3D(rq, zq, phiq, tq, out)
     ! -----------------------------------------------------------------------
     ! GET THE 3D FIELDS INTERPOLATION.
     !> \brief Obtains Br, Bz, Bphi interpolated in a given point,
@@ -779,6 +804,7 @@ contains
     real(8), intent(in)::rq      !< Query point in R major to interpolate.
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
+    real(8), intent(in)::tq      !< Time query point.
     real(8), intent(out)::out(3) !< Br, Bz, Bphi
 
     ! Interpolation coefficients.
@@ -799,23 +825,23 @@ contains
     ja1 = idx(4)
     ka  = idx(5)
     ka1 = idx(6)
-    out(1) =  Brfield(ia, ja,  ka )*aaa(1) + Brfield(ia1, ja,  ka )*aaa(2) + &
-              Brfield(ia, ja1, ka )*aaa(3) + Brfield(ia1, ja1, ka )*aaa(4) + &
-              Brfield(ia, ja,  ka1)*aaa(5) + Brfield(ia1, ja,  ka1)*aaa(6) + &
-              Brfield(ia, ja1, ka1)*aaa(7) + Brfield(ia1, ja1, ka1)*aaa(8)
+    out(1) =  Brfield(ia, ja,  ka , 1)*aaa(1) + Brfield(ia1, ja,  ka , 1)*aaa(2) + &
+              Brfield(ia, ja1, ka , 1)*aaa(3) + Brfield(ia1, ja1, ka , 1)*aaa(4) + &
+              Brfield(ia, ja,  ka1, 1)*aaa(5) + Brfield(ia1, ja,  ka1, 1)*aaa(6) + &
+              Brfield(ia, ja1, ka1, 1)*aaa(7) + Brfield(ia1, ja1, ka1, 1)*aaa(8)
 
-    out(2) =  Bzfield(ia, ja,  ka )*aaa(1) + Bzfield(ia1, ja,  ka )*aaa(2) + &
-              Bzfield(ia, ja1, ka )*aaa(3) + Bzfield(ia1, ja1, ka )*aaa(4) + &
-              Bzfield(ia, ja,  ka1)*aaa(5) + Bzfield(ia1, ja,  ka1)*aaa(6) + &
-              Bzfield(ia, ja1, ka1)*aaa(7) + Bzfield(ia1, ja1, ka1)*aaa(8)
+    out(2) =  Bzfield(ia, ja,  ka , 1)*aaa(1) + Bzfield(ia1, ja,  ka , 1)*aaa(2) + &
+              Bzfield(ia, ja1, ka , 1)*aaa(3) + Bzfield(ia1, ja1, ka , 1)*aaa(4) + &
+              Bzfield(ia, ja,  ka1, 1)*aaa(5) + Bzfield(ia1, ja,  ka1, 1)*aaa(6) + &
+              Bzfield(ia, ja1, ka1, 1)*aaa(7) + Bzfield(ia1, ja1, ka1, 1)*aaa(8)
 
-    out(3) =  Bphifield(ia, ja,  ka )*aaa(1) + Bphifield(ia1, ja,  ka )*aaa(2) + &
-              Bphifield(ia, ja1, ka )*aaa(3) + Bphifield(ia1, ja1, ka )*aaa(4) + &
-              Bphifield(ia, ja,  ka1)*aaa(5) + Bphifield(ia1, ja,  ka1)*aaa(6) + &
-              Bphifield(ia, ja1, ka1)*aaa(7) + Bphifield(ia1, ja1, ka1)*aaa(8)
+    out(3) =  Bphifield(ia, ja,  ka , 1)*aaa(1) + Bphifield(ia1, ja,  ka , 1)*aaa(2) + &
+              Bphifield(ia, ja1, ka , 1)*aaa(3) + Bphifield(ia1, ja1, ka , 1)*aaa(4) + &
+              Bphifield(ia, ja,  ka1, 1)*aaa(5) + Bphifield(ia1, ja,  ka1, 1)*aaa(6) + &
+              Bphifield(ia, ja1, ka1, 1)*aaa(7) + Bphifield(ia1, ja1, ka1, 1)*aaa(8)
   end subroutine getField_3D
 
-  subroutine getField_2D(rq, zq, phiq, out)
+  subroutine getField_2D(rq, zq, phiq, tq, out)
     ! -----------------------------------------------------------------------
     ! GET THE 2D FIELDS INTERPOLATION.
     !> \brief Obtains Br, Bz, Bphi, Er, Ez, Ephi interpolated in a given point,
@@ -827,6 +853,7 @@ contains
     real(8), intent(in)::rq      !< Query point in R major to interpolate.
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
+    real(8), intent(in)::tq      !< Time query point.
     real(8), intent(out)::out(3) !< Br, Bz, Bphi
 
     ! Interpolation coefficients.
@@ -840,22 +867,21 @@ contains
     end if
 
     call interpolate2D_coefficients(grr, gzz, rq, zq, aaa, idx)
-
     ia  = idx(1)
     ia1 = idx(2)
     ja  = idx(3)
     ja1 = idx(4)
-    out(1) =  Brfield(ia, 1, ja)*aaa(1)   + Brfield(ia1, 1, ja)*aaa(2) &
-            + Brfield(ia, 1, ja1)*aaa(3)  + Brfield(ia1, 1, ja1)*aaa(4)
+    out(1) =  Brfield(ia, 1, ja, 1)*aaa(1)   + Brfield(ia1, 1, ja, 1)*aaa(2) &
+            + Brfield(ia, 1, ja1, 1)*aaa(3)  + Brfield(ia1, 1, ja1, 1)*aaa(4)
 
-    out(2) =  Bzfield(ia, 1, ja)*aaa(1)   + Bzfield(ia1, 1, ja)*aaa(2) &
-            + Bzfield(ia, 1, ja1)*aaa(3)  + Bzfield(ia1, 1, ja1)*aaa(4)
+    out(2) =  Bzfield(ia, 1, ja, 1)*aaa(1)   + Bzfield(ia1, 1, ja, 1)*aaa(2) &
+            + Bzfield(ia, 1, ja1, 1)*aaa(3)  + Bzfield(ia1, 1, ja1, 1)*aaa(4)
 
-    out(3) =  Bphifield(ia, 1, ja)*aaa(1)   + Bphifield(ia1, 1, ja)*aaa(2) &
-            + Bphifield(ia, 1, ja1)*aaa(3)  + Bphifield(ia1, 1, ja1)*aaa(4)
+    out(3) =  Bphifield(ia, 1, ja, 1)*aaa(1)   + Bphifield(ia1, 1, ja, 1)*aaa(2) &
+            + Bphifield(ia, 1, ja1, 1)*aaa(3)  + Bphifield(ia1, 1, ja1, 1)*aaa(4)
   end subroutine getField_2D
 
-  subroutine getField_0D(rq, zq, phiq, out)
+  subroutine getField_0D(rq, zq, phiq, tq, out)
     ! -----------------------------------------------------------------------
     ! GET THE FIELD of only 0D
     !> \brief Obtains Br, Bz, Bphi, interpolated in a given point,
@@ -867,14 +893,67 @@ contains
     real(8), intent(in)::rq      !< Query point in R major to interpolate.
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
+    real(8), intent(in)::tq    !< Query point in toroidal direciton.
     real(8), intent(out)::out(3) !< Br, Bz, Bphi
 
-    out(1) =  Brfield(1, 1, 1)
+    out(1) =  Brfield(1, 1, 1, 1)
 
-    out(2) =  Bzfield(1, 1, 1)
+    out(2) =  Bzfield(1, 1, 1, 1)
 
-    out(3) =  Bphifield(1, 1, 1)
+    out(3) =  Bphifield(1, 1, 1, 1)
   end subroutine getField_0D
+
+  subroutine Bsystem()
+    ! -----------------------------------------------------------------------
+    ! Prepare the pinhole reference system
+    !> \brief Calculate the reference system of the pinhole
+    ! Written by Jose Rueda
+    ! When executed, it set in the code workspace:
+    !   - rPinCyl !< Cylindrical coordinates of the pinhole
+    !   - pinhole%e3,2,1 !< reference vectors in the pinhole
+    !   - Bpinhole !< Magnetic field at the inhole in cartesian coordiates
+    !   - BpinholeMod !< Modulus of the magnetic field at the pinhole
+    ! -----------------------------------------------------------------------
+
+    ! --- Local variables
+    real(8) :: project !< Projection of the magnetic field in the u2 vector
+    real(8) :: e1mod !< Modulus of the e1 vector
+    real(8), dimension(3):: field_in_cyl ! Field at the pinhole in cylindrical
+
+    ! Calculate the pinhole position in cylindrical coordinates
+    rPinCyl(1) = sqrt(pinhole%r(1)**2 + pinhole%r(2)**2)
+    rPinCyl(2) = atan2(pinhole%r(2), pinhole%r(1))
+    rPinCyl(3) = pinhole%r(3)
+
+    ! Get the magnetic field in the pinhole
+    call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
+    call pol2cart_cov((/field_in_cyl(1),field_in_cyl(3), field_in_cyl(2) /), Bpinhole, rPinCyl)
+    BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
+    print*, BpinholeMod, Bpinhole, rPinCyl
+    ! calculate the normal vectors
+    call vec_product(-Bpinhole,pinhole%u2,pinhole%e1)
+    e1mod = sqrt(pinhole%e1(1)**2 + pinhole%e1(2)**2 &
+                                   + pinhole%e1(3)**2)
+    ! See handwritten SINPA notes for full explanation with 3D drawings
+    if (e1mod.lt.0.001) then ! B is in line with u2
+      if (sum(pinhole%u2 * Bpinhole) .gt. 0.0) then
+        pinhole%e3 = pinhole%u2
+        pinhole%e2 = pinhole%u1
+        pinhole%e1 = pinhole%u3
+      else
+        pinhole%e3 = - pinhole%u2
+        pinhole%e2 = pinhole%u3
+        pinhole%e1 = pinhole%u1
+      endif
+    else
+      pinhole%e1 = pinhole%e1 / e1mod
+      project = Bpinhole(1)*pinhole%u2(1) + Bpinhole(2)*pinhole%u2(2) + Bpinhole(3)*pinhole%u2(3)
+      pinhole%e2 = BpinholeMod**2 * pinhole%u2 - project * Bpinhole
+      pinhole%e2 = pinhole%e2 / sqrt(pinhole%e2(1)**2 + pinhole%e2(2)**2 &
+                                   + pinhole%e2(3)**2)
+      pinhole%e3 = Bpinhole / BpinholeMod
+    endif
+  end subroutine Bsystem
 
 !-------------------------------------------------------------------------------
 ! SECTION 5: COLLISION CHECK and INTEGRATOR
@@ -1063,7 +1142,7 @@ contains
     ! The fields, however, are stored in cylindrical coordinates, so the position
     ! must be firstly translated into that coordinate system.
     call cart2pol(r_plus_half, r_polar)
-    call getField(r_polar(1), r_polar(2), r_polar(3), field_data)
+    call getField(r_polar(1), r_polar(2), r_polar(3), 0.0d0, field_data)
     ! We have the fields in polar coordinates, but the Boris method requires the
     ! cartesian ones:
     call pol2cart_cov((/field_data(1),field_data(3), field_data(2) /), B, r_polar)
@@ -1182,32 +1261,39 @@ contains
   end subroutine parseGeometry
 
   subroutine readGeometry(geomID, n, verb)
-    ! Read the Geometry files. Note: No more than 9 files can be read. I could
-    ! easily avoid this, but, are you going to define more than 9  geometric
-    ! files??
+    ! -----------------------------------------------------------------------
+    ! Prepare the geometry elements
+    !> \brief Prepare the geometry elements
+    ! Written by Jose Rueda
+    ! When executed, it set in the code workspace:
+    !   - geometry !< the array of geometrical elements
+    !   - pinhole  !< structure with data from the pinhole
+    !
+    ! Note: Maximum number of files to be read is set to 9. This could be
+    ! easily enanced, but, really, more than 9 files??
+    ! -----------------------------------------------------------------------
     implicit none
     ! Dummy variables
-    character (len=*), intent(in) :: geomID
-    integer, intent(in) :: n
-
-
+    character (len=*), intent(in) :: geomID  !< ID of the geometry to read
+    integer, intent(in) :: n   !< Number of elements to read
     logical, intent(in):: verb !< Write to console some info.
 
     ! Local variables
-    integer :: kk,ll
-    real (8), dimension(3):: vector1,vector2
-    integer:: ierr, pinholeKind
-    real(8), dimension(3) :: u1, u2, u3, rPin
-    real(8) :: d1, d2
-    character (len=1000) :: dummy_string, err_str, geometry_dir
-    character (len=1) :: number
+    integer :: kk,ll  !< index for loops
+    integer:: ierr  !< error storing variable
+    integer:: pinholeKind !< kind of pinhole (namelist variables)
+    real(8), dimension(3) :: u1, u2, u3, rPin !< variables for the namelist
+    real(8) :: d1, d2 !< kind of pinhole (namelist variables)
+    character (len=1000) :: dummy_string, err_str, geometry_dir !< dummy strings
+    character (len=1) :: number !< number where to save the element we are reading
 
-
-    ! Read namelist and configure the plates
     NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, rotation, pinholeKind
 
-    ! Read the files
+    ! Read namelist and configure the plates
     geometry_dir = trim(SINPA_dir)//'Geometry/'
+    open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
+    read(60, NML=ExtraGeometryParams, iostat=ierr)
+    close(60)
 
     ! read the plates
     allocate(geometry(n))
@@ -1216,10 +1302,7 @@ contains
       dummy_string = trim(geometry_dir)//geomID//'/Element'//number//'.txt'
       call parseGeometry(trim(dummy_string),verb, geometry(i))
     enddo
-    ! Read the pinhole system
-    open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
-    read(60, NML=ExtraGeometryParams, iostat=ierr)
-    close(60)
+
     ! Fill the pinhole object
     pinhole%u1 = u1
     pinhole%u2 = u2
@@ -1235,6 +1318,7 @@ contains
       print*, 'Pinhole u3', pinhole%u3
       print*, 'Pinhole d1', pinhole%d1
       print*, 'Pinhole d2', pinhole%d2
+      print*, 'Scintillator reference point', ps
     endif
   end subroutine readGeometry
 
@@ -1242,11 +1326,21 @@ contains
 ! SECTION 7: FIDASIM compatibility
 !------------------------------------------------------------------------------
   subroutine readFIDASIM4Markers(filename)
+    ! -----------------------------------------------------------------------
+    ! Load a FIDASIM npa file
+    !> \brief Load markers from a FIDASIM simulation
+    ! Written by Jose Rueda
+    ! When executed, it set in the code workspace:
+    !   - F4Markers !< Structure with NPA data
+    !
+    ! -----------------------------------------------------------------------
+
     ! Dummy variables:
-    character (*) :: filename !< Name of the file with the markers
+    character(*), intent(in) :: filename !< Name of the file with the markers
     ! Local variables:
     real(4), dimension(:), allocatable:: dummy1D
     real(4), dimension(:, :), allocatable:: dummy2D
+
     print*, 'Reading markers info from: ', trim(filename)
     open(60, file=trim(filename), action='read',access='stream')
     read(60) F4Markers%shot_number
@@ -1278,12 +1372,22 @@ contains
  !------------------------------------------------------------------------------
  ! SECTION 8: Initialization of markers
  !------------------------------------------------------------------------------
- subroutine initMarker(index, vmod, dt_initial, xi)
+ subroutine initMarker(vmod, dt_initial, xxi, beta_min, dbeta)
+   ! -----------------------------------------------------------------------
+   ! Initialise the marker
+   !> \brief Initialise the marker for the simulation
+   ! Written by Jose Rueda
+   ! When executed, it set in the code workspace:
+   !   - part !< Structure with particle data
+   !
+   ! -----------------------------------------------------------------------
+   implicit none
    !----
-   integer, intent(in):: index
-   real(8), intent(in):: vmod
-   real(8), intent(in):: dt_initial
-   real(8), intent(in):: xi
+   real(8), intent(in):: vmod   !< Modulus of the velocity to be used
+   real(8), intent(in):: dt_initial  !< initial dt to use in the tracking [s]
+   real(8), intent(in):: xxi  !< Value of the xi variable to use
+   real(8), intent(in):: beta_min !< Minimum value of the random angle [rad]
+   real(8), intent(in):: dbeta !< Interval of the beta angle [rad]
    !---
    real(8):: distance
    ! Clean the marker position and trajectory
@@ -1293,7 +1397,7 @@ contains
    part%kindOfCollision = 9  ! Just initialise it to a dummy value
    part%dt = dt_initial
    part%qm    = Zin *qe / M /amu_to_kg
-   part%xi = xi
+   part%xi = xxi
 
    ! Init the marker position
    distance = 1000.0
@@ -1306,21 +1410,81 @@ contains
         distance = sqrt(sum((part%position(:, 1) - pinhole%r)**2))
       enddo
     else
-      part%position(:, 1) = rPin + &
-          pinhole%d1 * (-1+2*ran(1))*pinhole%u1 + &
-          pinhole%d2 * (-1+2*ran(2))*pinhole%u2
+      call random_number(ran)
+      part%position(:, 1) = pinhole%r + &
+          0.5*pinhole%d1 * (-1+2*ran(1))*pinhole%u1 + &
+          0.5*pinhole%d2 * (-1+2*ran(2))*pinhole%u2
     endif
-    ! Initialise the random angle
-    part%beta = minAngle + dAngle*ran(3)
     ! Init marker velocity
+    part%beta = beta_min + ran(3) * dbeta
     if (FILDSIMmode) then
-      print*, 'no implemented'
-    else
-      part%velocity(:, 1) = ((cos(xi)*pinhole%u3 + &
-                              sin(xi)*pinhole%u1) * cos(part%beta) &
+
+      part%velocity(:, 1) = vmod * (sqrt(1-xxi**2) * (cos(part%beta)*pinhole%e1 + &
+                                                      sin(part%beta)*pinhole%e2) +&
+                                    xxi * pinhole%e3)
+      part%weight         = 1.0
+    else   ! INPA mode
+      part%velocity(:, 1) = ((cos(xxi)*pinhole%u3 + &
+                              sin(xxi)*pinhole%u1) * cos(part%beta) &
                            + sin(part%beta)*pinhole%u2) * vmod
 
       part%weight         = abs(sin(part%beta))
     endif
  end subroutine initMarker
+
+ subroutine calculate_betas()
+   ! -----------------------------------------------------------------------
+   ! Calculate the beta angles to be used
+   !> \brief calculate the beta intervas to be latter used
+   ! Written by Jose Rueda
+   ! When executed, it set in the code workspace:
+   !   - min_beta !< Array with beta angles for the simulation
+   !   - delta_beta !< array with deltas for the beta angle
+   ! Note: if in the input namelist, the dAngle is larger than 0.001, the
+   ! namelist values will be used and this will be ignored
+   ! -----------------------------------------------------------------------
+
+   ! local variables
+   real(8), dimension(50):: gyrop
+   real(8), dimension(3):: dummy_v
+   logical, dimension(50):: flags
+   real(8)::step
+   integer::ilocal
+   integer::dummy_counter=0
+   allocate(min_beta(nxi))
+   allocate(delta_beta(nxi))
+   if (dAngle .gt. 0.001) then
+      min_beta(:) = minAngle
+      delta_beta(:) = dAngle
+   else
+     step = 2*pi/50.0d0
+     do ilocal = 1, 50
+       gyrop(ilocal) = -pi + (dble(ilocal)-1.0d0)*step + 0.001d0
+     end do
+
+     do iXI = 1, nxi
+       flags(:) = .False.
+       dummy_counter = 0
+       do i = 1, 50
+         dummy_v = sqrt(1-XI(iXI)**2) * (cos(gyrop(i))*pinhole%e1 + &
+                                                 sin(gyrop(i))*pinhole%e2) +&
+                   XI(iXI) * pinhole%e3
+         if (sum(dummy_v * pinhole%u3) .lt. 0.0d0) then
+           flags(i) = .True.
+           dummy_counter = dummy_counter + 1
+         endif
+       end do
+       min_beta(iXI) = minval(gyrop,mask=flags)
+       delta_beta(iXI) = maxval(gyrop, mask=flags) - min_beta(iXI)
+       if (delta_beta(iXI) .lt. 0.001) then ! We are in the weird case
+         min_beta(iXI) = minval(gyrop+pi,mask=flags)
+         delta_beta(iXI) = maxval(gyrop+pi, mask=flags) - min_beta(iXI)
+
+       end if
+       if (dummy_counter .eq. 0) then
+        print*, 'Not possible gyrophase range for: ', XI(iXI)
+       endif
+     end do
+   endif
+ end subroutine calculate_betas
 end module sinpa_module

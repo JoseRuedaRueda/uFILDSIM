@@ -20,12 +20,13 @@
 !> \brief Main SINPA core
 ! -----------------------------------------------------------------------------
 program sinpa
+  !****************************************************************************
   ! --- Note on units to open files
   !       - 60: Temporal files: Inputs/output. Open, read(write) and close it
   !       - 61: File with the strike points for the mapping (signal)
   !       - 62: Colimator data
   !       - 63: Orbit file
-
+  !****************************************************************************
   use sinpa_module
   implicit none
   !----------------------------------------------------------------------------
@@ -51,8 +52,10 @@ program sinpa
   ! we open and close the namelist file each time because the python routine
   ! which generate the namelist can write the different namelist in different
   ! order in the file.
+  ! Allocate the gyroradius and pitch arrays to be readed
   allocate (rl(nGyroradius))
-  allocate (alphas(nxi))
+  allocate (XI(nxi))
+  ! Read the input namelist
   open (unit=60, file=input_filename, form='formatted', iostat=ierr)
   read(60, NML=inputParams, iostat = ierr)
   close(60)
@@ -63,9 +66,6 @@ program sinpa
     read(60, NML=nbi_namelist, iostat = ierr)
     nbi%u = u
     nbi%p0 = p0
-    if (verbose) then
-      print*, 'NBI namelist read.'
-    endif
     close(60)
     ! Markers interaction (energy loss and scattering) parameters
     open (unit=60, file=input_filename, form='formatted', iostat=ierr)
@@ -89,20 +89,24 @@ program sinpa
   endif
 
   ! --- Load the grid and magnetic field
-  call parseField(trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/field.bin')
-  ! Calculate the pinhole position in cylindrical coordinates
-  rPinCyl(1) = sqrt(pinhole%r(1)**2 + pinhole%r(2)**2)
-  rPinCyl(2) = atan2(pinhole%r(2), pinhole%r(1))
-  rPinCyl(3) = pinhole%r(3)
-  ! Get the magnetic field in the pinhole
-  call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), Bpinhole)
-  BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
+  call parseField(trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/field.bin',&
+                  verbose)
+  call Bsystem()
   if (verbose) then
     print*, '-----------------------------------------------------------------'
     print*, 'Magnetic field at the pinhole: ', Bpinhole
     print*, 'Mod: ', BpinholeMod
     print*, '-----------------------------------------------------------------'
   endif
+
+  ! --- Translate from FILDSIM pitch criteria to decent one
+  if (FILDSIMmode.eqv..True.) then
+    ! Keep the crazy FILDSIM criteria
+    XI = dble(IpBt) * cos(XI*pi/180)
+
+  endif
+  ! --- Caclualte the beta (gyrophases) for all X values
+  call calculate_betas()
   !-----------------------------------------------------------------------------
   !=============================================================================
   ! ROUND 2: MAPPING
@@ -118,11 +122,11 @@ program sinpa
     open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
          '/results/StrikePoints.bin', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, alphas, 18
+    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 18
     ! -- Strike points on the collimator
     open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
          '/results/CollimatorStrikePoints.bin', access = 'stream', action='write')
-    write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, alphas, 4
+    write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 4
     ! -- File to save the orbits
     if (saveOrbits) then
       open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
@@ -153,7 +157,7 @@ program sinpa
       else
         dtNeutral = 4./v0 ! if we launched neutrals
       endif
-      Lalphas: do ialpha = 1, nxi  ! Loop over the alpha angles
+      LXI: do iXI = 1, nxi  ! Loop over the alpha angles
         ! -- Initialise all the counters
         cScintillator = 0
         cCollimator = 0
@@ -165,7 +169,7 @@ program sinpa
         Strike(:,:) = 0.0d0
         !
         Lmarkers: do  imc = 1, nMap
-          call initMarker(imc, v0, dtneutral, alphas(ialpha))
+          call initMarker(v0, dtneutral, XI(iXI), min_beta(iXI), delta_beta(iXI))
 
           tracking: do istep = 1, part%n_t-1
             call pushParticle(part%qm, part%position(:, istep), &
@@ -180,15 +184,18 @@ program sinpa
                 cCollimator = cCollimator + 1
                 CollimatorStrikes(1:3, cCollimator) = part%collision_point
                 CollimatorStrikes(4, cCollimator) = part%weight
-                cycle Lmarkers
+
                 if (saveOrbits) then
                   call random_number(rand_number)
                   if (rand_number .lt. saveRatio) then
                     cOrb = cOrb + 1
-                    write(63) istep
-                    write(63) transpose(part%position(:, 1:istep))
+                    write(63) istep+1
+                    write(63) part%kindOfCollision
+                    part%position(:, istep+1) = part%collision_point
+                    write(63) transpose(part%position(:, 1:(istep+1)))
                   endif
                 endif
+                cycle Lmarkers
               elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
                 cScintillator = cScintillator + 1 ! Update counter
                 ! See from where this markers was coming
@@ -209,8 +216,10 @@ program sinpa
                   call random_number(rand_number)
                   if (rand_number .lt. saveRatio) then
                     cOrb = cOrb + 1
-                    write(63) istep
-                    write(63) transpose(part%position(:, 1:istep))
+                    write(63) istep+1
+                    write(63) part%kindOfCollision
+                    part%position(:, istep+1) = part%collision_point
+                    write(63) transpose(part%position(:, 1:(istep+1)))
                   endif
                 endif
                 cycle Lmarkers
@@ -224,6 +233,17 @@ program sinpa
               endif
             endif
           enddo tracking
+          ! if we achieve this point, the particle has not collide, save the
+          ! orbit for future analysis
+          if (saveOrbits) then
+            call random_number(rand_number)
+            if (rand_number .lt. saveRatio) then
+              cOrb = cOrb + 1
+              write(63) part%n_t
+              write(63) part%kindOfCollision
+              write(63) transpose(part%position(:, :))
+            endif
+          endif
         enddo Lmarkers
         ! ! Rotate the data
         ! Strike(16:18, 1:cScintillator ) = &
@@ -234,7 +254,11 @@ program sinpa
         ! Print some information
         if (verbose) then
           print*, '-----'
-          print*, 'Gyroradius:', rL(irl), ' Alpha:', alphas(ialpha)
+          if (FILDSIMmode) then
+            print*, 'Gyroradius:', rL(irl), ' Alpha:', 180.0*acos(XI(iXI)/IpBt)/pi
+          else
+            print*, 'Gyroradius:', rL(irl), ' Alpha:', XI(iXI)
+          endif
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
           print*, 'Wrong Neutrals', cWrongNeutral
@@ -242,27 +266,27 @@ program sinpa
           print*, 'Foil', cFoil
         endif
         ! Average the position of the markers
-        StrikeMap(1, ialpha + (irl - 1) * nxi) = rL(irl)
-        StrikeMap(2, ialpha + (irl - 1) * nxi) = alphas(ialpha)
-        StrikeMap(3, ialpha + (irl - 1) * nxi) = &   ! Strike point at Scint
-          sum(Strike(:, 16)) / cScintillator
-        StrikeMap(4, ialpha + (irl - 1) * nxi) = &
-          sum(Strike(:, 17)) / cScintillator
-        StrikeMap(5, ialpha + (irl - 1) * nxi) = &
-          sum(Strike(:, 18)) / cScintillator
-        StrikeMap(6, ialpha + (irl - 1) * nxi) = &  ! Birth position (NBI)
-          sum(Strike(:, 5)) / cScintillator
-        StrikeMap(7, ialpha + (irl - 1) * nxi) = &
-          sum(Strike(:, 6)) / cScintillator
-        StrikeMap(8, ialpha + (irl - 1) * nxi) = &
-          sum(Strike(:, 7)) / cScintillator
-        StrikeMap(9, ialpha + (irl - 1) * nxi) = &  ! Distance to NBI line
-          sum(Strike(:, 11)) / cScintillator
-        StrikeMap(10, ialpha + (irl - 1) * nxi) = & ! Collimator factor
+        StrikeMap(1, iXI + (irl - 1) * nxi) = rL(irl)
+        StrikeMap(2, iXI + (irl - 1) * nxi) = XI(iXI)
+        StrikeMap(3, iXI + (irl - 1) * nxi) = &   ! Strike point at Scint
+          sum(Strike(16, :)) / cScintillator
+        StrikeMap(4, iXI + (irl - 1) * nxi) = &
+          sum(Strike(17, :)) / cScintillator
+        StrikeMap(5, iXI + (irl - 1) * nxi) = &
+          sum(Strike(18, :)) / cScintillator
+        StrikeMap(6, iXI + (irl - 1) * nxi) = &  ! Birth position (NBI)
+          sum(Strike(5, :)) / cScintillator
+        StrikeMap(7, iXI + (irl - 1) * nxi) = &
+          sum(Strike(6, :)) / cScintillator
+        StrikeMap(8, iXI + (irl - 1) * nxi) = &
+          sum(Strike(7, :)) / cScintillator
+        StrikeMap(9, iXI + (irl - 1) * nxi) = &  ! Distance to NBI line
+          sum(Strike(11, :)) / cScintillator
+        StrikeMap(10, iXI + (irl - 1) * nxi) = & ! Collimator factor
           dble(cScintillator) / dble(nMap)            ! and striking ions
-        StrikeMap(11, ialpha + (irl - 1) * nxi) = cScintillator
+        StrikeMap(11, iXI + (irl - 1) * nxi) = cScintillator
         ! De-allocate the variables
-      enddo Lalphas
+      enddo LXI
     enddo Lenergies
     ! Write the strike map
     print*,'Saving strike map in: '
@@ -282,8 +306,9 @@ program sinpa
     close(62)
     if (saveOrbits) then
       write(63) cOrb  ! Write how many orbits we wrote in the file
+      close(63)
     endif
-    close(63)
+
     !De-allocate
     deallocate(StrikeMap)
     deallocate(part%position)
