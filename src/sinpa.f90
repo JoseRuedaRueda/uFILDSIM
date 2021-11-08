@@ -90,6 +90,7 @@ program sinpa
 
   ! --- Load the grid and magnetic field
   call parseField(trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/field.bin',&
+                  trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/Efield.bin',&
                   verbose)
   call Bsystem()
   if (verbose) then
@@ -120,18 +121,23 @@ program sinpa
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
     open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/StrikePoints.bin', access = 'stream', action='write')
+         '/results/StrikePoints.bin', access = 'stream', action='write', status='replace')
     ! Save the header of the file
     write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 18
     ! -- Strike points on the collimator
     open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/CollimatorStrikePoints.bin', access = 'stream', action='write')
+         '/results/CollimatorStrikePoints.bin', access = 'stream', action='write', status='replace')
     write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 4
     ! -- File to save the orbits
     if (saveOrbits) then
       open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-           '/results/Orbits.bin', access = 'stream', action='write')
+           '/results/Orbits.bin', access = 'stream', action='write', status='replace')
       write(63) versionID1, versionID2, runID
+      if (saveOrbitLongMode) then
+        write(63) 69
+      else
+        write(63) 6
+      endif
     endif
 
     ! --- Allocate the necesary matrices
@@ -151,25 +157,24 @@ program sinpa
     Lenergies: do irl = 1, nGyroradius   ! Loop over energies (gyroradii)
       ! Get a dummy velocity modulus
       call rl2v0(rL(irl), M, Zout, BpinholeMod, v0)
+
       ! Set the dt to avoid doing unnnecesary steps for each markers
       if (Zin .gt. 0.1) then  ! if we launched ions
         dtNeutral = dt
       else
-        dtNeutral = 4./v0 ! if we launched neutrals
+        dtNeutral = 0.04 / v0 ! if we launched neutrals
       endif
       LXI: do iXI = 1, nxi  ! Loop over the alpha angles
         ! -- Initialise all the counters
         cScintillator = 0
         cCollimator = 0
-        cWrongIons = 0
-        cWrongNeutral = 0
         cFoil = 0
         ! -- Clean the matrices with the complete information
         CollimatorStrikes(:,:) = 0.0d0
         Strike(:,:) = 0.0d0
-        !
+
         Lmarkers: do  imc = 1, nMap
-          call initMarker(v0, dtneutral, XI(iXI), min_beta(iXI), delta_beta(iXI))
+          call initMarker(v0, dtneutral, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
 
           tracking: do istep = 1, part%n_t-1
             call pushParticle(part%qm, part%position(:, istep), &
@@ -185,14 +190,14 @@ program sinpa
                 CollimatorStrikes(1:3, cCollimator) = part%collision_point
                 CollimatorStrikes(4, cCollimator) = part%weight
 
+
                 if (saveOrbits) then
                   call random_number(rand_number)
                   if (rand_number .lt. saveRatio) then
-                    cOrb = cOrb + 1
-                    write(63) istep+1
-                    write(63) part%kindOfCollision
+                    ! Save the collision point in the trajectory for future use
                     part%position(:, istep+1) = part%collision_point
-                    write(63) transpose(part%position(:, 1:(istep+1)))
+                    cOrb = cOrb + 1
+                    call saveOrbit(63, part, istep+1, saveOrbitLongMode)
                   endif
                 endif
                 cycle Lmarkers
@@ -215,11 +220,11 @@ program sinpa
                 if (saveOrbits) then
                   call random_number(rand_number)
                   if (rand_number .lt. saveRatio) then
-                    cOrb = cOrb + 1
-                    write(63) istep+1
-                    write(63) part%kindOfCollision
+                    ! Save the collision point in the trajectory for future use
                     part%position(:, istep+1) = part%collision_point
-                    write(63) transpose(part%position(:, 1:(istep+1)))
+                    cOrb = cOrb + 1
+                    call saveOrbit(63, part, istep+1, saveOrbitLongMode)
+
                   endif
                 endif
                 cycle Lmarkers
@@ -238,10 +243,9 @@ program sinpa
           if (saveOrbits) then
             call random_number(rand_number)
             if (rand_number .lt. saveRatio) then
+              ! Save the collision point in the trajectory for future use
               cOrb = cOrb + 1
-              write(63) part%n_t
-              write(63) part%kindOfCollision
-              write(63) transpose(part%position(:, :))
+              call saveOrbit(63, part, part%n_t, saveOrbitLongMode)
             endif
           endif
         enddo Lmarkers
@@ -305,6 +309,7 @@ program sinpa
     close(61)
     close(62)
     if (saveOrbits) then
+      write(63) m
       write(63) cOrb  ! Write how many orbits we wrote in the file
       close(63)
     endif

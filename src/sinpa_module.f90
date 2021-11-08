@@ -59,6 +59,7 @@ module sinpa_module
       real (8):: qm !< q over m, SI
       ! For the mapping
       real (8):: xi  !< xi angle (or pitch for FILD), radians
+      real (8):: rl !< gyroradius of the particle [cm]
       real (8):: beta  !< beta angle (or Gyrophase for FILD), radians
       ! Integration
       real (8):: dt !< dt for the integration [s]
@@ -66,17 +67,7 @@ module sinpa_module
   end type marker
 
   ! ABSTRACT CLASS FOR THE FIELDS
-  ! >/briefg
-  type :: fields
-    integer :: nr                 ! Size of the grid in the r dimension
-    integer :: nz                 ! Size of the grid in the z dimension
-    real(8):: rmin       ! Minimum value of the r array
-    real(8):: zmin       ! Minimum value of the z array
-    real(8):: dr         ! Spacing f the grid in the r direction
-    real(8):: dz         ! Spacing f the grid in the r direction
-    real(8), dimension(:,:,:), allocatable :: Brzt,E ! Fields
-  end type fields
-
+  ! >/briefg FIDASIM markers
   type :: FIDASIM
         integer(4):: shot_number !< shot number of the performed sim
         real(4) :: time !< time point of the simulation
@@ -89,31 +80,32 @@ module sinpa_module
         integer, dimension(:), allocatable :: kind !< kind, active, passive...
   end type FIDASIM
 
-  type :: scatteringData
-    ! Sigma for the model of scattering in the carbon foil
-    integer :: na                 ! Number of angles
-    integer :: ne                 ! Number of energies
-    real(8):: amin     ! Angles array
-    real(8):: da       !
-    real(8):: emin     ! Energies array
-    real(8):: de       !
-    real(8), dimension(:,:), allocatable :: sigma      ! Sigma matrix
-    ! Coefficients of the fit for the energy. See the wiki or the carbon foil
-    ! routines in section 4
-    real(8), dimension(:,:), allocatable :: p1_ener,p2_ener
-    real(8):: depth
-  end type scatteringData
+  ! type :: scatteringData
+  !   ! Sigma for the model of scattering in the carbon foil
+  !   integer :: na                 ! Number of angles
+  !   integer :: ne                 ! Number of energies
+  !   real(8):: amin     ! Angles array
+  !   real(8):: da       !
+  !   real(8):: emin     ! Energies array
+  !   real(8):: de       !
+  !   real(8), dimension(:,:), allocatable :: sigma      ! Sigma matrix
+  !   ! Coefficients of the fit for the energy. See the wiki or the carbon foil
+  !   ! routines in section 4
+  !   real(8), dimension(:,:), allocatable :: p1_ener,p2_ener
+  !   real(8):: depth
+  ! end type scatteringData
+  !
+  !
+  ! type :: sigma_optics
+  !   ! Sigma for the model of optical resolution
+  !   integer :: no                 ! Number of points
+  !   real(8),dimension(3):: optical_axis ! Position of the optical axis
+  !   real(8):: delta       !
+  !   real(8), dimension(:), allocatable :: dist,so
+  ! end type sigma_optics
 
-
-  type :: sigma_optics
-    ! Sigma for the model of optical resolution
-    integer :: no                 ! Number of points
-    real(8),dimension(3):: optical_axis ! Position of the optical axis
-    real(8):: delta       !
-    real(8), dimension(:), allocatable :: dist,so
-  end type sigma_optics
-
-
+  ! ABSTRACT CLASS FOR THE NBI
+  ! >/briefg NBI geometry
   type :: NBI_class
     character (len=20) :: name  !< NBI name
     real(8), dimension(3) ::  p0  !< Initial point of the NBI
@@ -157,10 +149,12 @@ module sinpa_module
     subroutine interpolateField_interface(rq, zq, phiq, tq, out)
       implicit none
       real(kind=8), intent(in)::rq, zq, phiq, tq! Query points in all directions.
-      real(kind=8), intent(out)::out(3) ! Br, Bz, Bphi
+      real(kind=8), intent(out)::out(6) ! Br, Bz, Bphi
     end subroutine interpolateField_interface
   end interface
   procedure(interpolateField_interface),pointer, public::getField
+
+
   ! -------------------------------------------------------------------------
   ! Variables
   ! -------------------------------------------------------------------------
@@ -182,6 +176,9 @@ module sinpa_module
   real(8), dimension(:, :, :, :), allocatable, protected::Brfield    !< Radial magnetic field.
   real(8), dimension(:, :, :, :), allocatable, protected::Bzfield    !< Vertical magnetic field.
   real(8), dimension(:, :, :, :), allocatable, protected::Bphifield  !< Toroidal magnetic field.
+  real(8), dimension(:, :, :, :), allocatable, protected::Erfield    !< Radial electric field [V/cm].
+  real(8), dimension(:, :, :, :), allocatable, protected::Ezfield    !< Vertical electric field [V/cm].
+  real(8), dimension(:, :, :, :), allocatable, protected::Ephifield  !< Toroidal electric field [V/cm].
   ! --- grids
   type(grid_class), protected:: grr  !< Grid classes to store the R grid
   type(grid_class), protected:: gzz  !< Grid classes to store the Z grid
@@ -247,17 +244,20 @@ module sinpa_module
   integer:: nResampling !< number of markers per energy-pitch for the map
   logical:: saveOrbits !< flag to decide if we save the orbits
   real(8) :: saveRatio !< Ratio of orbits to be saved
+  logical:: saveOrbitLongMode !< Flag to save orbits in long or short format
   logical:: verbose !< Print information of the run
   real(8) :: M !< Mass of the particle, in amu
   real(8) :: Zin !< Initial chargeof the particle, in |e|
   real(8) :: Zout !< Charge after ionization, in |e|
   integer :: IpBt !< Sign of the magnetic field vs the current
+  logical :: flag_efield_on !< include or not electric field
+
 
   ! Namelist
   NAMELIST /config/ runID, geomID, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
     nMap, mapping,&
-    signal, resampling, nResampling, saveOrbits, saveRatio, SINPA_dir,&
-    FIDASIMfolder, verbose, M, Zin, Zout, IpBt
+    signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, SINPA_dir,&
+    FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on
 
   ! --- Input
   integer:: nGyro !< number of points in a complete gyrocicle of the particle
@@ -441,7 +441,8 @@ contains
     real(8), intent(in):: B !< Modulus of the field
     real(8), intent(out):: v0 !< Modulus of the field
 
-    v0 = rL * abs(Z) * B / M * qe / amu_to_kg
+    ! Factor 100.0 is included because the rl is inserted in cm
+    v0 = rL * abs(Z) * B / M * qe / amu_to_kg / 100.0d0
   end subroutine rl2v0
 
 
@@ -541,23 +542,6 @@ contains
       nbi%phipoints(ii) = atan2(nbi%points(2, ii), nbi%points(1, ii))
     end do
   end subroutine initNBI
-
-  ! subroutine getNBIpoint(nbi, axis_data, value, p)
-  !   ! ToDo. Include tolerance
-  !   ! INPUTS
-  !   type(NBI_class), intent(in) :: nbi  !< NBI object
-  !   real(8), dimension(nbi%npoints), intent(in) :: axis_data
-  !   real(8), intent(in) :: value
-  !   ! Ouputs
-  !   real(8), dimension(3), intent(out) :: p
-  !   ! Local
-  !   integer :: i
-  !
-  !   ! Find the position of the desired value
-  !   i = minloc(abs(axis_data - value))
-  !   ! return the data
-  !   p = nbi%points(:, i)
-  ! end subroutine getNBIpoint
 
   subroutine minimumDistanceLines(p, v, r, w, d_local, point)
     ! -------------------------------------------------------------------------
@@ -690,7 +674,7 @@ contains
 !------------------------------------------------------------------------------
 ! SECTION 4: MAGNETIC FIELD
 !------------------------------------------------------------------------------
-  subroutine parseField(Bname, verbose_flag)
+  subroutine parseField(Bname, Ename, verbose_flag)
     !---------------------------------------------------------------------------
     ! This subroutine load the magnetic field
     !
@@ -698,12 +682,14 @@ contains
     !
     ! INPUTS:
     !       - Bname: Name of the field to read
+    !       - Ename: Name of the field to read
     ! OUTPUTS:
     !       - magnetic field arrays will be filled
     !---------------------------------------------------------------------------
     implicit none
     ! Dummy variables
     character(len=*), intent(in)::Bname   !< Filename with the magnetic field.
+    character(len=*), intent(in)::Ename   !< Filename with the magnetic field.
     logical, intent(in) :: verbose_flag  !< flag to print the information or not
     ! Local variables
     integer::lr, lz, lphi, ntot
@@ -718,6 +704,7 @@ contains
     open(unit = 60, file=Bname, access='stream', status='old', action='read')
     read(60) lr, lz, lphi, ntot, &
              rmin, rmax, zmin, zmax, phimin, phimax, timemin, timemax
+
     if (verbose_flag) then
       print*, 'The header of the magnetic field was parsed:'
       print*, 'RESULTS'
@@ -740,6 +727,25 @@ contains
     read(60) Bphifield
     read(60) Bzfield
     close(60)
+    if (flag_efield_on) then
+      print*, 'reading:', Ename
+      open(unit = 60, file=Ename, access='stream', status='old', action='read')
+      read(60) lr1, lz1, lphi1, ntot1, &
+               rmin, rmax, zmin, zmax, phimin, phimax, timemin, timemax
+      if ((lr1.ne.lr).or.(lz1.ne.lz).or.(lphi1.ne.lphi).or.(ntot.ne.ntot1)) THEN
+        print*, 'Different grid size found in E and B Fields'
+        close(60)
+        stop
+      endif
+      print*, 'parsing electrinc field'
+      allocate(Erfield(lr, lphi, lz, ntot))
+      allocate(Ezfield(lr, lphi, lz, ntot))
+      allocate(Ephifield(lr, lphi, lz, ntot))
+      read(60) Erfield
+      read(60) Ephifield
+      read(60) Ezfield
+      close(60)
+    endif
     ! Once we read everything, we create the grids:
     call linspace2(rmin, rmax, lr, grr)
     call linspace2(zmin, zmax, lz, gzz)
@@ -789,6 +795,12 @@ contains
     deallocate(Bzfield)
     deallocate(Bphifield)
 
+    ! Releasing the memory used by the fields.
+    deallocate(Erfield)
+    deallocate(Ezfield)
+    deallocate(Ephifield)
+
+
     getField => NULL()
   end subroutine unloadField
 
@@ -805,15 +817,16 @@ contains
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
     real(8), intent(in)::tq      !< Time query point.
-    real(8), intent(out)::out(3) !< Br, Bz, Bphi
+    real(8), intent(out)::out(6) !< Br, Bz, Bphi, Er, Ez, Ephi
 
     ! Interpolation coefficients.
     real(8)::aaa(8)
     integer::idx(6), ia, ia1, ja, ja1, ka, ka1
+    real(8), dimension(3):: dum
 
     ! First, we have to check if the data point is out of range.
     if((rq .gt. grr%x1) .or.  (zq .gt. gzz%x1) .or. (zq .lt. gzz%x0))then
-      out(1:3) = 0.0d0
+      out(1:6) = 0.0d0
       return
     end if
 
@@ -825,20 +838,43 @@ contains
     ja1 = idx(4)
     ka  = idx(5)
     ka1 = idx(6)
-    out(1) =  Brfield(ia, ja,  ka , 1)*aaa(1) + Brfield(ia1, ja,  ka , 1)*aaa(2) + &
+    dum(1) =  Brfield(ia, ja,  ka , 1)*aaa(1) + Brfield(ia1, ja,  ka , 1)*aaa(2) + &
               Brfield(ia, ja1, ka , 1)*aaa(3) + Brfield(ia1, ja1, ka , 1)*aaa(4) + &
               Brfield(ia, ja,  ka1, 1)*aaa(5) + Brfield(ia1, ja,  ka1, 1)*aaa(6) + &
               Brfield(ia, ja1, ka1, 1)*aaa(7) + Brfield(ia1, ja1, ka1, 1)*aaa(8)
 
-    out(2) =  Bzfield(ia, ja,  ka , 1)*aaa(1) + Bzfield(ia1, ja,  ka , 1)*aaa(2) + &
+    dum(2) =  Bzfield(ia, ja,  ka , 1)*aaa(1) + Bzfield(ia1, ja,  ka , 1)*aaa(2) + &
               Bzfield(ia, ja1, ka , 1)*aaa(3) + Bzfield(ia1, ja1, ka , 1)*aaa(4) + &
               Bzfield(ia, ja,  ka1, 1)*aaa(5) + Bzfield(ia1, ja,  ka1, 1)*aaa(6) + &
               Bzfield(ia, ja1, ka1, 1)*aaa(7) + Bzfield(ia1, ja1, ka1, 1)*aaa(8)
 
-    out(3) =  Bphifield(ia, ja,  ka , 1)*aaa(1) + Bphifield(ia1, ja,  ka , 1)*aaa(2) + &
+    dum(3) =  Bphifield(ia, ja,  ka , 1)*aaa(1) + Bphifield(ia1, ja,  ka , 1)*aaa(2) + &
               Bphifield(ia, ja1, ka , 1)*aaa(3) + Bphifield(ia1, ja1, ka , 1)*aaa(4) + &
               Bphifield(ia, ja,  ka1, 1)*aaa(5) + Bphifield(ia1, ja,  ka1, 1)*aaa(6) + &
               Bphifield(ia, ja1, ka1, 1)*aaa(7) + Bphifield(ia1, ja1, ka1, 1)*aaa(8)
+
+    call pol2cart_cov((/dum(1),dum(3),dum(2) /), out(1:3), (/rq, zq, phiq/))
+    if(flag_efield_on)then
+      dum(1) =  Erfield(ia, ja,  ka , 1)*aaa(1) + Erfield(ia1, ja,  ka , 1)*aaa(2) + &
+                Erfield(ia, ja1, ka , 1)*aaa(3) + Erfield(ia1, ja1, ka , 1)*aaa(4) + &
+                Erfield(ia, ja,  ka1, 1)*aaa(5) + Erfield(ia1, ja,  ka1, 1)*aaa(6) + &
+                Brfield(ia, ja1, ka1, 1)*aaa(7) + Erfield(ia1, ja1, ka1, 1)*aaa(8)
+
+      dum(2) =  Ezfield(ia, ja,  ka , 1)*aaa(1) + Ezfield(ia1, ja,  ka , 1)*aaa(2) + &
+                Ezfield(ia, ja1, ka , 1)*aaa(3) + Ezfield(ia1, ja1, ka , 1)*aaa(4) + &
+                Ezfield(ia, ja,  ka1, 1)*aaa(5) + Ezfield(ia1, ja,  ka1, 1)*aaa(6) + &
+                Ezfield(ia, ja1, ka1, 1)*aaa(7) + Ezfield(ia1, ja1, ka1, 1)*aaa(8)
+
+      dum(3) =  Ephifield(ia, ja,  ka , 1)*aaa(1) + Ephifield(ia1, ja,  ka , 1)*aaa(2) + &
+                Ephifield(ia, ja1, ka , 1)*aaa(3) + Ephifield(ia1, ja1, ka , 1)*aaa(4) + &
+                Ephifield(ia, ja,  ka1, 1)*aaa(5) + Ephifield(ia1, ja,  ka1, 1)*aaa(6) + &
+                Ephifield(ia, ja1, ka1, 1)*aaa(7) + Ephifield(ia1, ja1, ka1, 1)*aaa(8)
+      call pol2cart_cov((/dum(1),dum(3),dum(2) /), out(4:6), (/rq, zq, phiq/))
+    else
+      out(4:6) = 0.0d0
+    end if
+    ! Now pass wot cartesian coordinates
+
   end subroutine getField_3D
 
   subroutine getField_2D(rq, zq, phiq, tq, out)
@@ -854,15 +890,16 @@ contains
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
     real(8), intent(in)::tq      !< Time query point.
-    real(8), intent(out)::out(3) !< Br, Bz, Bphi
+    real(8), intent(out)::out(6) !< Br, Bz, Bphi
 
     ! Interpolation coefficients.
     real(8)::aaa(4)
     integer::idx(4), ia, ia1, ja, ja1
+    real(8), dimension(3):: dum
 
     ! First, we have to check if the data point is out of range.
     if((rq .gt. grr%x1) .or.  (zq .gt. gzz%x1) .or. (zq .lt. gzz%x0) .or. (rq .lt. grr%x0))then
-      out(1:3) = 0.0d0
+      out(1:6) = 0.0d0
       return
     end if
 
@@ -871,14 +908,29 @@ contains
     ia1 = idx(2)
     ja  = idx(3)
     ja1 = idx(4)
-    out(1) =  Brfield(ia, 1, ja, 1)*aaa(1)   + Brfield(ia1, 1, ja, 1)*aaa(2) &
+    dum(1) =  Brfield(ia, 1, ja, 1)*aaa(1)   + Brfield(ia1, 1, ja, 1)*aaa(2) &
             + Brfield(ia, 1, ja1, 1)*aaa(3)  + Brfield(ia1, 1, ja1, 1)*aaa(4)
 
-    out(2) =  Bzfield(ia, 1, ja, 1)*aaa(1)   + Bzfield(ia1, 1, ja, 1)*aaa(2) &
+    dum(2) =  Bzfield(ia, 1, ja, 1)*aaa(1)   + Bzfield(ia1, 1, ja, 1)*aaa(2) &
             + Bzfield(ia, 1, ja1, 1)*aaa(3)  + Bzfield(ia1, 1, ja1, 1)*aaa(4)
 
-    out(3) =  Bphifield(ia, 1, ja, 1)*aaa(1)   + Bphifield(ia1, 1, ja, 1)*aaa(2) &
+    dum(3) =  Bphifield(ia, 1, ja, 1)*aaa(1)   + Bphifield(ia1, 1, ja, 1)*aaa(2) &
             + Bphifield(ia, 1, ja1, 1)*aaa(3)  + Bphifield(ia1, 1, ja1, 1)*aaa(4)
+    call pol2cart_cov((/dum(1),dum(3),dum(2)/), out(1:3), (/rq, zq, phiq/))
+
+    if(flag_efield_on)then
+      dum(1) =  Erfield(ia, 1, ja, 1)*aaa(1)   + Erfield(ia1, 1, ja, 1)*aaa(2) &
+              + Erfield(ia, 1, ja1, 1)*aaa(3)  + Erfield(ia1, 1, ja1, 1)*aaa(4)
+
+      dum(2) =  Ezfield(ia, 1, ja, 1)*aaa(1)   + Ezfield(ia1, 1, ja, 1)*aaa(2) &
+              + Ezfield(ia, 1, ja1, 1)*aaa(3)  + Ezfield(ia1, 1, ja1, 1)*aaa(4)
+
+      dum(3) =  Ephifield(ia, 1, ja, 1)*aaa(1)   + Ephifield(ia1, 1, ja, 1)*aaa(2) &
+              + Ephifield(ia, 1, ja1, 1)*aaa(3)  + Ephifield(ia1, 1, ja1, 1)*aaa(4)
+      call pol2cart_cov((/dum(1),dum(3),dum(2) /), out(4:6), (/rq, zq, phiq/))
+    else
+      out(4:6) = 0.0d0
+    end if
   end subroutine getField_2D
 
   subroutine getField_0D(rq, zq, phiq, tq, out)
@@ -886,6 +938,9 @@ contains
     ! GET THE FIELD of only 0D
     !> \brief Obtains Br, Bz, Bphi, interpolated in a given point,
     !! (R, z).
+    !
+    ! Note: zero field is suppose to be in cartesian coordinates!!!
+    !
     ! Written by Jose Rueda
     ! -----------------------------------------------------------------------
     implicit none
@@ -894,13 +949,23 @@ contains
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
     real(8), intent(in)::tq    !< Query point in toroidal direciton.
-    real(8), intent(out)::out(3) !< Br, Bz, Bphi
+    real(8), intent(out)::out(6) !< Br, Bz, Bphi
 
     out(1) =  Brfield(1, 1, 1, 1)
 
-    out(2) =  Bzfield(1, 1, 1, 1)
+    out(2) =  Bphifield(1, 1, 1, 1)
 
-    out(3) =  Bphifield(1, 1, 1, 1)
+    out(3) =  Bzfield(1, 1, 1, 1)
+
+    if(flag_efield_on)then
+      out(4) =  Erfield(1, 1, 1, 1)
+
+      out(5) =  Ephifield(1, 1, 1, 1)
+
+      out(6) =  Ezfield(1, 1, 1, 1)
+    else
+      out(4:6) = 0.0d0
+    end if
   end subroutine getField_0D
 
   subroutine Bsystem()
@@ -918,7 +983,7 @@ contains
     ! --- Local variables
     real(8) :: project !< Projection of the magnetic field in the u2 vector
     real(8) :: e1mod !< Modulus of the e1 vector
-    real(8), dimension(3):: field_in_cyl ! Field at the pinhole in cylindrical
+    real(8), dimension(6):: field ! Field at the pinhole in cylindrical
 
     ! Calculate the pinhole position in cylindrical coordinates
     rPinCyl(1) = sqrt(pinhole%r(1)**2 + pinhole%r(2)**2)
@@ -926,10 +991,11 @@ contains
     rPinCyl(3) = pinhole%r(3)
 
     ! Get the magnetic field in the pinhole
-    call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
-    call pol2cart_cov((/field_in_cyl(1),field_in_cyl(3), field_in_cyl(2) /), Bpinhole, rPinCyl)
+    ! call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
+    ! call pol2cart_cov((/field_in_cyl(1),field_in_cyl(3), field_in_cyl(2) /), Bpinhole, rPinCyl)
+    call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field)
+    Bpinhole = field(1:3)
     BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
-    print*, BpinholeMod, Bpinhole, rPinCyl
     ! calculate the normal vectors
     call vec_product(-Bpinhole,pinhole%u2,pinhole%e1)
     e1mod = sqrt(pinhole%e1(1)**2 + pinhole%e1(2)**2 &
@@ -1131,8 +1197,8 @@ contains
     real (8), dimension(3)::vminus, vplus
     real (8):: mod_t_2
     real (8), dimension(3)::t, s, vprime, vprime2
-    real (8), dimension(3):: B, B1
-    real (8), dimension(3)::field_data ! This contains the interpolated data.
+    real (8), dimension(3):: B, B1, E
+    real (8), dimension(6)::field_data ! This contains the interpolated data.
     ! Note, 't' is a really bad notation for an auxiliary vector, but in most books
     ! is used, so I will maintain the name
 
@@ -1143,11 +1209,14 @@ contains
     ! must be firstly translated into that coordinate system.
     call cart2pol(r_plus_half, r_polar)
     call getField(r_polar(1), r_polar(2), r_polar(3), 0.0d0, field_data)
+    B = field_data(1:3)
+    E = field_data(4:6)
     ! We have the fields in polar coordinates, but the Boris method requires the
     ! cartesian ones:
-    call pol2cart_cov((/field_data(1),field_data(3), field_data(2) /), B, r_polar)
+    ! call pol2cart_cov((/field_data(1),field_data(3), field_data(2) /), B, r_polar)
+    ! call pol2cart_cov((/field_data(4),field_data(6), field_data(5) /), E, r_polar)
     ! 3. First half of the acceleration:
-    vminus = v0
+    vminus = v0 + 0.5d0*qm*dt*E
 
     ! 4. Calculation of the auxiliary vectors t and s
     t = 0.50d0*qm *B*dt
@@ -1169,7 +1238,7 @@ contains
     vplus(3) = vprime2(1)*s(2) - vprime2(2)*s(1) + vminus(3)
 
     ! 6. Recover the real velocity at the point: v(n+1) = vplus + q/(2m)*E
-    v1 = vplus
+    v1 = vplus + 0.50d0*qm*E*dt
 
     ! 6. The position.
     r1 = r_plus_half + 0.50d0*v1*dt
@@ -1372,7 +1441,7 @@ contains
  !------------------------------------------------------------------------------
  ! SECTION 8: Initialization of markers
  !------------------------------------------------------------------------------
- subroutine initMarker(vmod, dt_initial, xxi, beta_min, dbeta)
+ subroutine initMarker(vmod, dt_initial, xxi, beta_min, dbeta, rli)
    ! -----------------------------------------------------------------------
    ! Initialise the marker
    !> \brief Initialise the marker for the simulation
@@ -1388,6 +1457,7 @@ contains
    real(8), intent(in):: xxi  !< Value of the xi variable to use
    real(8), intent(in):: beta_min !< Minimum value of the random angle [rad]
    real(8), intent(in):: dbeta !< Interval of the beta angle [rad]
+   real(8), intent(in):: rli !< Gyroradius of the particle
    !---
    real(8):: distance
    ! Clean the marker position and trajectory
@@ -1398,6 +1468,7 @@ contains
    part%dt = dt_initial
    part%qm    = Zin *qe / M /amu_to_kg
    part%xi = xxi
+   part%rl = rli
 
    ! Init the marker position
    distance = 1000.0
@@ -1487,4 +1558,36 @@ contains
      end do
    endif
  end subroutine calculate_betas
+
+ !-----------------------------------------------------------------------------
+ ! SECTION 9: Saving
+ !-----------------------------------------------------------------------------
+ subroutine saveOrbit(fid, marker_to_save, step_to_save, long_flag)
+   ! -----------------------------------------------------------------------
+   ! Save the orbit
+   !> \brief Save the orbit into the binary file
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - fid: FID of the file where to write (it should be open already)
+   !  - marker to save: marker to be saved
+   !  - step_to_save: Maximum step to be saved in the trajectory
+   !  - long_flag: if true to so called 'long' format will be used
+   ! -----------------------------------------------------------------------
+   implicit none
+   ! Dummy variables
+   integer, intent(in):: fid
+   type(marker), intent(in):: marker_to_save
+   integer, intent(in):: step_to_save
+   logical, intent(in):: long_flag
+
+   write(fid) step_to_save
+   write(fid) marker_to_save%rl
+   write(fid) marker_to_save%xi
+   write(fid) marker_to_save%kindOfCollision
+   write(fid) transpose(marker_to_save%position(:, 1:step_to_save))
+   if (long_flag) then
+     write(fid) transpose(marker_to_save%velocity(:, 1:step_to_save))
+   endif
+ end subroutine saveOrbit
 end module sinpa_module
