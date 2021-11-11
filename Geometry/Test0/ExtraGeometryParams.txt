@@ -1,10 +1,10 @@
 &ExtraGeometryParams   ! Namelist with the extra geometric parameters
   ! Pinhole
-  rPin(1) = 186.79875988,        ! Position of the pinhole XYZ
-  rPin(2) = -12.89792957,
-  rPin(3) = 96.19944222,
+  rPin(1) = 1.8679875988,        ! Position of the pinhole XYZ [m]
+  rPin(2) = -0.1289792957,
+  rPin(3) = 0.9619944222,
   pinholeKind = 0     ! 0 = Circular, 1 = rectangle
-  d1 = 0.15  ! Pinhole radius, or size along u1 (in cm)
+  d1 = 0.0015  ! Pinhole radius, or size along u1 (in m)
   d2 = 0.0   ! Size along u2, not used if we have a circular pinhole
 
   ! Unitary vectors:
@@ -21,22 +21,30 @@
   u3(3) = -0.86195793
 
   ! Reference system of the Scintillator:
-  ps(1) = 188.45682998
-  ps(2) = -13.24027367
-  ps(3) = 98.04494353
+  ps(1) = 1.8845682998
+  ps(2) = -0.1324027367
+  ps(3) = 0.9804494353
 
-  !usn(1) = 0.57924729 ! Normal to the scintillator, actually not used in
-  !usn(2) =  -0.06030532 ! the fortran code, but in the python routines
-  !usn(3) = 0.8129181
+  ScintNormal(1) = 0.57924729 ! Normal to the scintillator, actually not used in
+  ScintNormal(2) =  -0.06030532 ! the fortran code, but in the python routines
+  ScintNormal(3) = 0.8129181
 
-  rotation(1,1) = -0.57924729
-  rotation(1,2) = 0.06030532
-  rotation(1,3) = -0.8129181
-  rotation(2,1) = -0.06030532
-  rotation(2,2) = 0.99135661
-  rotation(2,3) = 0.1165133
-  rotation(3,1) = 0.8129181
-  rotation(3,2) = 0.1165133
-  rotation(3,3) = -0.5706039
-
+  !rotation(1,1) = -0.57924729
+  !rotation(1,2) = 0.06030532
+  !rotation(1,3) = -0.8129181
+  !rotation(2,1) = -0.06030532
+  !rotation(2,2) = 0.99135661
+  !rotation(2,3) = 0.1165133
+  !rotation(3,1) = 0.8129181
+  !rotation(3,2) = 0.1165133
+  !rotation(3,3) = -0.5706039
+  rotation(1,1) = 0.57925585
+  rotation(1,2) = -0.06035764
+  rotation(1,3) = 0.81290812
+  rotation(2,1) = -0.36612876
+  rotation(2,2) = 0.87173515
+  rotation(2,3) = 0.32561872
+  rotation(3,1) = -0.72829416
+  rotation(3,2) = -0.48624559
+  rotation(3,3) =  0.48285902
 /

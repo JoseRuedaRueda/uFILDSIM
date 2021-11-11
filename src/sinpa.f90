@@ -103,7 +103,7 @@ program sinpa
   ! --- Translate from FILDSIM pitch criteria to decent one
   if (FILDSIMmode) then
     ! Keep the crazy FILDSIM criteria
-    XI = dble(IpBt) * cos(XI*pi/180)
+    XI = dble(IpBt) * cos(XI*pi/180.0d0)
   endif
   ! --- Caclualte the beta (gyrophases) for all X values
   call calculate_betas()
@@ -325,6 +325,8 @@ program sinpa
     if (FILDSIMmode) then
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', 'Pitch-Angle (cm)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
               'Average_initial_gyrophase','N_strike_points', 'Collimator_Factor (%)', 'Average_incidence_angle'
+      ! Revert the pitch to the criteria useed in old fildsim
+      StrikeMap(2, :) = 180.0d0/pi*acos(StrikeMap(2, :)/dble(IpBt))
       write(60,'(9f12.7)') StrikeMap
     else
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a)') 'Gyroradius (cm)', &
