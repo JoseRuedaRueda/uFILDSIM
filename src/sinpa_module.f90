@@ -171,6 +171,7 @@ module sinpa_module
   real(8), dimension(:, :), allocatable:: CollimatorStrikes !< Matrix to store the strike map
   real(8), dimension(3,3):: rotation !< Rotation matrix
   real(8), dimension(3):: ps !< reference point in the scintillator
+  real(8), dimension(3):: ScintNormal !< Normal to the scintillator
 
   ! --- Magnetic field
   real(8), dimension(:, :, :, :), allocatable, protected::Brfield    !< Radial magnetic field.
@@ -223,6 +224,7 @@ module sinpa_module
   real(8) :: dMin  !< minimum distance to NBI of markers trajectories
   real(8), dimension(3) :: posMin  !< position to minimum distance to NBI of the mapping marker
   type(pinhole_system_type) :: pinhole !< pinhole definition
+  integer, dimension(2):: dummy_shape !< to get the size of the strike object
 
   ! --- FILDSIM mode
   real(8), dimension(:), allocatable::min_beta, delta_beta
@@ -1356,13 +1358,14 @@ contains
     character (len=1000) :: dummy_string, err_str, geometry_dir !< dummy strings
     character (len=1) :: number !< number where to save the element we are reading
 
-    NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, rotation, pinholeKind
+    NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, ScintNormal, rotation, pinholeKind
 
     ! Read namelist and configure the plates
     geometry_dir = trim(SINPA_dir)//'Geometry/'
     open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
+    
 
     ! read the plates
     allocate(geometry(n))
