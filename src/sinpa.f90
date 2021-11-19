@@ -128,7 +128,6 @@ program sinpa
     allocate(CollimatorStrikes(4,nMap))       ! Strike position on the coll
     ! Get the size (to later write it in the file)
     dummy_shape = shape(Strike)
-    print*,dummy_shape
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
     open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
@@ -298,7 +297,7 @@ program sinpa
           sum(Strike(5, :)) / cScintillator   ! Average initial gyrophase (beta)
         StrikeMap(7, iXI + (irl - 1) * nxi) = cScintillator ! N strikes
         StrikeMap(8, iXI + (irl - 1) * nxi) = & ! Collimator factor
-          dble(cScintillator) / dble(nMap)
+          100.0d0 * dble(cScintillator) / dble(nMap)
         StrikeMap(9, iXI + (irl - 1) * nxi) = &
           sum(Strike(12, :)) / cScintillator   ! Average incident angle
         if (FILDSIMmode.eqv..False.) then
@@ -323,17 +322,18 @@ program sinpa
     write(60,'(a,2x,a)') 'Simulation NAMELIST: ', input_filename
     write(60,'(a)') 'Dummy temporal line'
     if (FILDSIMmode) then
-      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', 'Pitch-Angle (cm)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
-              'Average_initial_gyrophase','N_strike_points', 'Collimator_Factor (%)', 'Average_incidence_angle'
+      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', &
+        'Pitch-Angle (degree)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
+        'Average_initial_gyrophase','N_strike_points', 'Collimator_Factor (percent)', 'Average_incidence_angle'
       ! Revert the pitch to the criteria useed in old fildsim
       StrikeMap(2, :) = 180.0d0/pi*acos(StrikeMap(2, :)/dble(IpBt))
-      write(60,'(9f12.7)') StrikeMap
+      write(60,'(9F14.6)') StrikeMap
     else
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a)') 'Gyroradius (cm)', &
               'Alpha [rad]', 'X [cm]', 'Y [cm]', 'Z [cm]', &
               'X0 [cm]','Y0[cm]', 'Z0[cm]','d0[cm]','Collimator_Factor (%)', 'nMarkers'
       ! Write the data
-      write(60,'(13f14.5)') StrikeMap
+      write(60,'(13F14.6)') StrikeMap
     endif
     ! Close all the openend files
     close(60)
