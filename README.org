@@ -9,11 +9,21 @@ In orther to compile the code, you should use the version of gfortran included i
 There are 2 ways of compiling the code:
   - 'make all': It will compile the code in a way that is compatible with all processors, should work from your laptop to tok cluster
   - 'make all_cluster': It will compile it with some optimization flags though for high performance CPU and clusters, using these options it will work much faster in toks (for example) but it will not work in toki
+*** First installation
+You should create 2 folders in the main directory of the SINPA code:
+  - 'bin': where the compiled binary will be located
+  - 'runs': where the inputs and outputs will be placed (this folder is provided in the new versions of the code)
+*** Test run
+SINPA comes with a test input configuration file. Once your code is compiled, go to the file './runs/InitialTest/inputs/InitialTest.cfg' and change the variable sinpa_dir by your path towards the SINPA code. Once that is done, open the terminal and type:
+  - 'cd <SINPA_FOLDER>'
+  - './bin/SINPA.go ./runs/InitialTest/inputs/InitialTest.cfg'
+
+The code should run. You will notice that there are a lot 'wrong markers' These are just markers which not collide with anything, for examples those with pitch too small (in degrees) are likely to don't collide with the scintillator. Don't worry, everything is fine
 
 *** Documentation
 - All objects and methods are documented such that the user can understand what is going on, although the code is new ans improvement in the documentation will come with new versions
 - For examples of how to execute the code and analyze the outputs, see the examples python scripts in the ScintillatorSuite library (to be added here in the future)
-- For a manual (more or less complete) with a complete benchmark with FILDSIM see <https://datashare.mpcdf.mpg.de/s/oQJw82fd705OEJ8>
+- For a manual (far to be complete) with a complete benchmark with FILDSIM see <https://datashare.mpcdf.mpg.de/s/oQJw82fd705OEJ8>
 
 *** Version control
 Each release will be denoted by 2 numbers: a.b meaning:
