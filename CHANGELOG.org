@@ -1,0 +1,2 @@
+** 0.2 Backtracing:
+- Included a flag to allow for backtracing in the namelist (the flag is called backtrace). The backtrace is just included reversing the sign of the time step in the integration

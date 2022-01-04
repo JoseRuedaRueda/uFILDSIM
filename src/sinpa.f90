@@ -13,7 +13,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 01/10/2021
-!> \version 0.0
+!> \version 0.1
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -106,7 +106,13 @@ program sinpa
     XI = dble(IpBt) * cos(XI*pi/180.0d0)
   endif
   ! --- Caclualte the beta (gyrophases) for all X values
-  call calculate_betas()
+  call calculate_betas()  ! This is in beta, not used at the moment
+  ! --- Stablish the sign of the dt
+  if (backtrace) then
+    time_sign = -1.0d0
+  else
+    time_sign = 1.0d0
+  endif
   !-----------------------------------------------------------------------------
   !=============================================================================
   ! ROUND 2: MAPPING
@@ -131,17 +137,19 @@ program sinpa
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
     open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/StrikePoints.bin', access = 'stream', action='write', status='replace')
+         '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
     ! Save the header of the file
     write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, transfer(FILDSIMmode, 1), dummy_shape(1)
     ! -- Strike points on the collimator
-    open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/CollimatorStrikePoints.bin', access = 'stream', action='write', status='replace')
-    write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 4
+    if (save_collimator_strike_points) then
+      open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+           '/results/'//trim(runID)//'.spcmap', access = 'stream', action='write', status='replace')
+      write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 4
+    endif
     ! -- File to save the orbits
     if (saveOrbits) then
       open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-           '/results/Orbits.bin', access = 'stream', action='write', status='replace')
+           '/results/'//trim(runID)//'.orb', access = 'stream', action='write', status='replace')
       write(63) versionID1, versionID2, runID
       if (saveOrbitLongMode) then
         write(63) 69
@@ -150,8 +158,9 @@ program sinpa
       endif
     endif
     ! --- Allocate the particle:
+    call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
-    dt = 2 * pi / OmegaPart / nGyro
+    dt = 2 * pi / OmegaPart / nGyro * time_sign
     part%n_t = int(maxT/dt)
     if (verbose) then
       print*, part%n_t, 'steps will be performed for each particle'
@@ -164,9 +173,9 @@ program sinpa
 
       ! Set the dt to avoid doing unnnecesary steps for each markers
       if (Zin .gt. 0.1) then  ! if we launched ions
-        dtNeutral = dt
+        dt1 = dt
       else
-        dtNeutral = 0.04 / v0 ! if we launched neutrals
+        dt1 = 0.04 / v0 * time_sign  ! if we launched neutrals
       endif
       LXI: do iXI = 1, nxi  ! Loop over the alpha angles
         ! -- Initialise all the counters
@@ -178,7 +187,7 @@ program sinpa
         Strike(:,:) = 0.0d0
 
         Lmarkers: do  imc = 1, nMap
-          call initMarker(v0, dtneutral, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
+          call initMarker(v0, dt1, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
 
           tracking: do istep = 1, part%n_t-1
             call pushParticle(part%qm, part%position(:, istep), &
@@ -268,7 +277,9 @@ program sinpa
         !   MATMUL(rotation, transpose(Strike(1:3, 1:cScintillator)) -ps)
         ! Write the markers in the file
         write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
-        write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+        if (save_collimator_strike_points) then
+          write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+        endif
         ! Print some information
         if (verbose) then
           print*, '-----'
@@ -276,12 +287,11 @@ program sinpa
             print*, 'Gyroradius:', rL(irl), ' Alpha:', 180.0*acos(XI(iXI)/IpBt)/pi
           else
             print*, 'Gyroradius:', rL(irl), ' Alpha:', XI(iXI)
+            print*, ' Hitting Foil', cFoil
           endif
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
-          print*, 'Wrong Neutrals', cWrongNeutral
-          print*, 'Wrong Ions', cWrongIons
-          print*, 'Foil', cFoil
+          print*, 'Wrong markers', nMap - cCollimator - cScintillator
         endif
         ! Save the strike map (average everything)
         ! ToDo: correct collimator factor for the interval or launched gyrophase
@@ -313,14 +323,16 @@ program sinpa
         ! De-allocate the variables
       enddo LXI
     enddo Lenergies
+    call cpu_time(t_final_orbits)
+    print*,'It took (in seconds): ', t_final_orbits - t_initial_orbits
     ! Write the strike map
     print*,'Saving strike map in: '
-    print*,trim(SINPA_dir)//'/runs/'//trim(runID)//'/results/StrikeMap.txt'
-    open(unit=60, file=trim(SINPA_dir)//'runs/'//trim(runID)//&
-         '/results/StrikeMap.txt', action='write', form='formatted')
+    print*,trim(SINPA_dir)//'/runs/'//trim(runID)//'/results/'//trim(runID)//'.map'
+    open(unit=60, file=trim(SINPA_dir)//'/runs/'//trim(runID)//'/results/'&
+      //trim(runID)//'.map', action='write', form='formatted')
     ! Write the header
-    write(60,'(a,2x,a)') 'Simulation NAMELIST: ', input_filename
-    write(60,'(a)') 'Dummy temporal line'
+    write(60,'(a,2x,a)') 'Simulation NAMELIST: ', trim(input_filename)
+    write(60,'(a)') '1 # One means the strike map was done with SINPA'
     if (FILDSIMmode) then
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', &
         'Pitch-Angle (degree)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
@@ -338,7 +350,9 @@ program sinpa
     ! Close all the openend files
     close(60)
     close(61)
-    close(62)
+    if (save_collimator_strike_points) then
+      close(62)
+    endif
     if (saveOrbits) then
       write(63) m
       write(63) cOrb  ! Write how many orbits we wrote in the file
@@ -363,12 +377,12 @@ program sinpa
     ! --- Open the file to save the data
     ! -- Strike points on the scintillator
     open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/SignalStrikePoints.bin', access = 'stream', action='write')
+         '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
     write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, 15
     ! -- Strike points on the collimator
     open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-         '/results/SignalCollimatorStrikePoints.bin', access = 'stream', action='write')
+         '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
     write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0,4
     ! -- File to save the orbits
     if (saveOrbits) then
@@ -380,7 +394,7 @@ program sinpa
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
     dt = 2 * pi / OmegaPart / nGyro
     part%n_t = int(maxT/dt)
-    dtNeutral = 4.0E-7
+    dt1 = 4.0E-7
     if (verbose) then
       print*, part%n_t, 'steps will be performed for each particle'
     endif
@@ -407,7 +421,7 @@ program sinpa
       part%position(:,1) = F4Markers%fpos(:, i)
       part%velocity(:,1) = F4Markers%v(:, i)
       ! - dt and charge
-      part%dt    = dtNeutral
+      part%dt    = dt1
       part%qm    = Zin *qe / M /amu_to_kg
       signal_tracking: do istep = 1, part%n_t-1
         call pushParticle(part%qm, part%position(:, istep), &

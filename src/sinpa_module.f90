@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 0  !< ID version number, to identify ouput
-  integer, parameter:: versionid2 = 0  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -164,7 +164,7 @@ module sinpa_module
   real(8), dimension(:), allocatable:: dPoints    !< distance to NBI
   type(marker) :: part
   real(8) :: dt !< dt for the time integration, in s
-  real(8) :: dtNeutral
+  real(8) :: dt1
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
   real(8), dimension(:, :), allocatable:: Strike !< Matrix to store data
   real(8), dimension(:, :), allocatable:: StrikeMap !< Matrix to store the strike map
@@ -225,10 +225,14 @@ module sinpa_module
   real(8), dimension(3) :: posMin  !< position to minimum distance to NBI of the mapping marker
   type(pinhole_system_type) :: pinhole !< pinhole definition
   integer, dimension(2):: dummy_shape !< to get the size of the strike object
+  real(8) :: time_sign !< sign for dt (>0 forward modelling, <0 backtrace)
 
   ! --- FILDSIM mode
   real(8), dimension(:), allocatable::min_beta, delta_beta
 
+  ! --- Timing
+  real(8) :: t_initial_orbits  !< Time were orbits calculation start
+  real(8) :: t_final_orbits !< Time were orbits were calculated
   ! ---------------------------------------------------------------------------
   ! NAMELIST
   ! --- Configuration file
@@ -253,13 +257,16 @@ module sinpa_module
   real(8) :: Zout !< Charge after ionization, in |e|
   integer :: IpBt !< Sign of the magnetic field vs the current
   logical :: flag_efield_on !< include or not electric field
+  logical :: save_collimator_strike_points !< Save the collimator strike points
+  logical :: backtrace !< flag to trace back the orbits
 
 
   ! Namelist
   NAMELIST /config/ runID, geomID, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
     nMap, mapping,&
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, SINPA_dir,&
-    FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on
+    FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
+    backtrace
 
   ! --- Input
   integer:: nGyro !< number of points in a complete gyrocicle of the particle
@@ -428,7 +435,7 @@ contains
   end subroutine linspace2
 
 
-  subroutine rl2v0(rL, M, Z, B, v0)
+  subroutine rl2v0(rLlocal, Mlocal, Z, B, v0local)
     ! -----------------------------------------------------------------------
     ! Give the velocity module for a given larmor radius
     !
@@ -437,14 +444,14 @@ contains
     ! -----------------------------------------------------------------------
     implicit none
     ! Dummy variables
-    real(8), intent(in):: rL !< Lamor radius
-    real(8), intent(in):: M !< Mass in amu
+    real(8), intent(in):: rLlocal !< Lamor radius
+    real(8), intent(in):: Mlocal !< Mass in amu
     real(8), intent(in):: Z !< charge in electron charge (abs)
     real(8), intent(in):: B !< Modulus of the field
-    real(8), intent(out):: v0 !< Modulus of the field
+    real(8), intent(out):: v0local !< Modulus of the field
 
     ! Factor 100.0 is included because the rl is inserted in cm
-    v0 = rL * abs(Z) * B / M * qe / amu_to_kg / 100.0d0
+    v0local = rLlocal * abs(Z) * B / Mlocal * qe / amu_to_kg / 100.0d0
   end subroutine rl2v0
 
 
@@ -876,7 +883,6 @@ contains
       out(4:6) = 0.0d0
     end if
     ! Now pass wot cartesian coordinates
-
   end subroutine getField_3D
 
   subroutine getField_2D(rq, zq, phiq, tq, out)
@@ -999,28 +1005,23 @@ contains
     Bpinhole = field(1:3)
     BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
     ! calculate the normal vectors
-    call vec_product(-Bpinhole,pinhole%u2,pinhole%e1)
+    call vec_product(pinhole%u3,Bpinhole,pinhole%e1)
     e1mod = sqrt(pinhole%e1(1)**2 + pinhole%e1(2)**2 &
                                    + pinhole%e1(3)**2)
     ! See handwritten SINPA notes for full explanation with 3D drawings
     if (e1mod.lt.0.001) then ! B is in line with u2
-      if (sum(pinhole%u2 * Bpinhole) .gt. 0.0) then
-        pinhole%e3 = pinhole%u2
-        pinhole%e2 = pinhole%u1
-        pinhole%e1 = pinhole%u3
-      else
-        pinhole%e3 = - pinhole%u2
-        pinhole%e2 = pinhole%u3
-        pinhole%e1 = pinhole%u1
-      endif
-    else
-      pinhole%e1 = pinhole%e1 / e1mod
-      project = Bpinhole(1)*pinhole%u2(1) + Bpinhole(2)*pinhole%u2(2) + Bpinhole(3)*pinhole%u2(3)
-      pinhole%e2 = BpinholeMod**2 * pinhole%u2 - project * Bpinhole
-      pinhole%e2 = pinhole%e2 / sqrt(pinhole%e2(1)**2 + pinhole%e2(2)**2 &
-                                   + pinhole%e2(3)**2)
-      pinhole%e3 = Bpinhole / BpinholeMod
+      print*, 'B field normal to the pinhole. Option not considered'
+      print*, 'Write to jrrueda@us.es'
+      stop
     endif
+    ! Now calculate e2:
+    pinhole%e3 = Bpinhole / BpinholeMod
+    pinhole%e1 = pinhole%e1 / e1mod
+    call vec_product(pinhole%e3,pinhole%e1,pinhole%e2)
+    print*,'e1: ',pinhole%e1
+    print*,'e2: ',pinhole%e2
+    print*,'e3: ',pinhole%e3
+
   end subroutine Bsystem
 
 !-------------------------------------------------------------------------------
@@ -1039,7 +1040,7 @@ contains
     ! ------------------------------------------------------------------
     ! Accuracy of the ray-triangle calculation in the same units 'triangles'
     ! coordinates are given.
-    real(8), parameter :: eps = 1.0d-10
+    real(8), parameter :: eps = 1.0d-12
 
     ! Ray coordinates: origin (o) and ending (p) points and collision point (t).
     ! Cartesian coordinates are required
@@ -1365,7 +1366,7 @@ contains
     open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
-    
+
 
     ! read the plates
     allocate(geometry(n))
