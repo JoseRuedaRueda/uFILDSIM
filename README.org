@@ -20,6 +20,7 @@ Each release will be denoted by 2 numbers: a.b meaning:
     - b: bug fixed and improved comments and documentation. Some new capabilities could be added (see changelog). The higher the number, the better.
     - a: indicate major changes in the code, versions with different 'a' may be not compatible, not recommended update to a higher 'a' version close to a conference
 
+** Develop
 *** Branches
 - master: Stable branch, things should work, may be a delay including new features
 - dev-branch: developers branch, may have some small bugs or not fully developed features. Include the latest features, not recommended for general public
@@ -39,10 +40,6 @@ If a new implementation is required, open the appropriate issue in the GIT and l
 - Bug: minor error found in the code. To be corrected at the earliest convenience.
 - Major error: an important error has to be solved in the code as soon as possible.
 - Minor priority: Label for maintainer, indicates that the request has low priority in the ToDo list
-
-** Machine names
-All devices are identified by three letters:
-- 'AUG': ASDEX Upgrade
 
 ** Useful links
 - FILDSIM code: <https://gitlab.mpcdf.mpg.de/jgq/FILDSIM.git>
