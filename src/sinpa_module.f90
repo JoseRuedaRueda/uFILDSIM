@@ -129,11 +129,10 @@ module sinpa_module
 
   !> \brief Contains the reference system in the pinhole
   type :: pinhole_system_type
-    real(8), dimension(3):: rPin  !< Position of the pinhole (cm)
     integer:: kind  !< kind of pinhole (circle, 0) (rectangle, 1)
-    real(8):: d1 ! Pinhole radius, or size along u1 (in cm)
-    real(8):: d2 ! Pinhole radius, or size along u2 (in cm)
-    real(8), dimension(3):: r  !< Position of the pinhole (cm)
+    real(8):: d1 ! Pinhole radius, or size along u1 (in m)
+    real(8):: d2 ! Pinhole radius, or size along u2 (in m)
+    real(8), dimension(3):: r  !< Position of the pinhole (m)
     real(8), dimension(3):: u1  !< Vector in the pinhole plane 1
     real(8), dimension(3):: u2  !< vector in the pinhole plane 2
     real(8), dimension(3):: u3  !< normal to the pinhole
@@ -195,7 +194,7 @@ module sinpa_module
   character (len=1000) :: FoilFile !< Foil file
   character (len=1000) :: ScintillatorFile !< Scintillator file
   character (len=1000) :: input_filename !< Scintillator file
-  character (len=1000) :: SINPA_dir !< root directory of SINPA
+  character (len=1000) :: runFolder !< root directory of SINPA
   character (len=1000) :: FIDASIMfolder !< root directory of SINPA
 
   ! --- Counters
@@ -210,7 +209,7 @@ module sinpa_module
 
   ! --- Others
   integer:: ierr !< error management
-  integer:: irl, iXI, imc, istep, iistep, i!< dummy for loops
+  integer:: irl, iXI, imc, istep, iistep, i, j!< dummy for loops
   real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
@@ -218,6 +217,7 @@ module sinpa_module
   real(8), dimension(3) :: r0  !< initial position for mapping markers
   real(8), dimension(3) :: vv0  !< initial velocity for mapping markers
   real(8), dimension(3) :: ran  !< Set of random numbers
+  real(8), dimension(3) :: pos1  !< Set of random numbers
   real(8), dimension(:, :), allocatable:: random_numbers  !< Set of random numbers
   real(8) :: rand_number  !< Set of random numbers
   real(8) :: beta  !< random angle for the markers
@@ -238,45 +238,45 @@ module sinpa_module
   ! --- Configuration file
   ! Dummy variables for the namelist
   character (len=50) :: runID !< runID
-  character (len=50) :: geomID !< geometryID
-  logical:: FILDSIMmode !< Flag to use FILDSIM mode or not
+  character (len=1000) :: GeomFolder !< geometryID
+  logical:: FILDSIMmode = .False. !< Flag to use FILDSIM mode or not
   integer:: nGeomElements !< Number of geometrical elements
   integer:: nxi !< number of pitches (R) to simulate
   integer:: nGyroradius !< number of energies (gyroradius) to simulate
-  integer:: nMap !< number of markers per energy-pitch for the map
-  logical:: mapping !< flag to decide if we launch mapping markers
-  logical:: signal !< flag to decide if we follow FIDASIM4 markers
-  logical:: resampling !< flag to decide if we resample FIDASIM markers
-  integer:: nResampling !< number of markers per energy-pitch for the map
-  logical:: saveOrbits !< flag to decide if we save the orbits
-  real(8) :: saveRatio !< Ratio of orbits to be saved
-  logical:: saveOrbitLongMode !< Flag to save orbits in long or short format
-  logical:: verbose !< Print information of the run
-  real(8) :: M !< Mass of the particle, in amu
-  real(8) :: Zin !< Initial chargeof the particle, in |e|
-  real(8) :: Zout !< Charge after ionization, in |e|
-  integer :: IpBt !< Sign of the magnetic field vs the current
-  logical :: flag_efield_on !< include or not electric field
-  logical :: save_collimator_strike_points !< Save the collimator strike points
-  logical :: backtrace !< flag to trace back the orbits
+  integer:: nMap = 5000 !< number of markers per energy-pitch for the map
+  logical:: mapping = .True.!< flag to decide if we launch mapping markers
+  logical:: signal = .False.!< flag to decide if we follow FIDASIM4 markers
+  logical:: resampling = .False.!< flag to decide if we resample FIDASIM markers
+  integer:: nResampling = 1 !< Resample number for FIDASIM simulations
+  logical:: saveOrbits = .False.!< flag to decide if we save the orbits
+  real(8) :: saveRatio = 0.0d0!< Ratio of orbits to be saved
+  logical:: saveOrbitLongMode = .False. !< Flag to save orbits in long or short format
+  logical:: verbose = .True. !< Print information of the run
+  real(8) :: M = 2.0d0!< Mass of the particle, in amu
+  real(8) :: Zin = 1.0d0!< Initial chargeof the particle, in |e|
+  real(8) :: Zout = 1.0d0!< Charge after ionization, in |e|
+  integer :: IpBt = -1!< Sign of the magnetic field vs the current
+  logical :: flag_efield_on = .false.!< include or not electric field
+  logical :: save_collimator_strike_points = .false. !< Save the collimator strike points
+  logical :: backtrace = .false.!< flag to trace back the orbits
 
 
   ! Namelist
-  NAMELIST /config/ runID, geomID, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
+  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
     nMap, mapping,&
-    signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, SINPA_dir,&
+    signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace
 
   ! --- Input
-  integer:: nGyro !< number of points in a complete gyrocicle of the particle
+  integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
 
-  real(8) :: minAngle  !< collimator vertical acceptance
-  real(8) :: dAngle  !< collimator vertical acceptance
+  real(8) :: minAngle = -1.8 !< collimator vertical acceptance
+  real(8) :: dAngle = 0.4 !< collimator vertical acceptance
 
-  real(8), dimension(:), allocatable:: XI
+  real(8), dimension(:), allocatable:: XI, XI_input
   real(8), dimension(:), allocatable:: rL !< FILDSIM gyroradius
-  real (8):: maxT !< maximum time to follow particles
+  real (8):: maxT = 0.0000001!< maximum time to follow particles
   NAMELIST /inputParams/ nGyro, minAngle, dAngle, XI, rL, maxT
 
   ! --- Mapping orientation
@@ -512,6 +512,103 @@ contains
     vcart(2) = vpol(1)*sin(r0(3)) + vpol(2)*cos(r0(3))
     vcart(3) = vpol(3)
   end subroutine pol2cart_cov
+
+! -----------------------------------------------------------------
+! QUICK sort of an array
+!> \brief Quick sort of array (for 1D array)
+! Taken from https://www.mjr19.org.uk/IT/sorts/
+! -----------------------------------------------------------------
+! This version maintains its own stack, to avoid needing to call
+! itself recursively. By always pushing the larger "half" to the
+! stack, and moving directly to calculate the smaller "half",
+! it can guarantee that the stack needs no more than log_2(N)
+! entries
+subroutine quicksort_nr(array)
+  implicit none
+  real(8), intent(inout)::array(:)
+  real(8) :: temp,pivot
+  integer :: i, j, left,right,low,high
+  ! If your compiler lacks storage_size(), replace
+  ! storage_size(i) by 64
+  integer :: stack(2,storage_size(i)),stack_ptr
+
+  low=1
+  high=size(array)
+  stack_ptr=1
+
+  do
+     if (high-low.lt.50) then ! use insertion sort on small arrays
+        do i=low+1,high
+           temp=array(i)
+           do j=i-1,low,-1
+              if (array(j).le.temp) exit
+              array(j+1)=array(j)
+           enddo
+           array(j+1)=temp
+        enddo
+        ! now pop from stack
+        if (stack_ptr.eq.1) return
+        stack_ptr=stack_ptr-1
+        low=stack(1,stack_ptr)
+        high=stack(2,stack_ptr)
+        cycle
+     endif
+
+     ! find median of three pivot
+     ! and place sentinels at first and last elements
+     temp=array((low+high)/2)
+     array((low+high)/2)=array(low+1)
+     if (temp.gt.array(high)) then
+        array(low+1)=array(high)
+        array(high)=temp
+     else
+        array(low+1)=temp
+     endif
+     if (array(low).gt.array(high)) then
+        temp=array(low)
+        array(low)=array(high)
+        array(high)=temp
+     endif
+     if (array(low).gt.array(low+1)) then
+        temp=array(low)
+        array(low)=array(low+1)
+        array(low+1)=temp
+     endif
+     pivot=array(low+1)
+
+     left=low+2
+     right=high-1
+     do
+        do while(array(left).lt.pivot)
+           left=left+1
+        enddo
+        do while(array(right).gt.pivot)
+           right=right-1
+        enddo
+        if (left.ge.right) exit
+        temp=array(left)
+        array(left)=array(right)
+        array(right)=temp
+        left=left+1
+        right=right-1
+     enddo
+     if (left.eq.right) left=left+1
+     !          call quicksort(array(1:left-1))
+     !          call quicksort(array(left:))
+     if (left.lt.(low+high)/2) then
+        stack(1,stack_ptr)=left
+        stack(2,stack_ptr)=high
+        stack_ptr=stack_ptr+1
+        high=left-1
+     else
+        stack(1,stack_ptr)=low
+        stack(2,stack_ptr)=left-1
+        stack_ptr=stack_ptr+1
+        low=left
+     endif
+
+  enddo
+end subroutine quicksort_nr
 !-------------------------------------------------------------------------------
 ! SECTION 2: NBI
 !-------------------------------------------------------------------------------
@@ -1010,6 +1107,7 @@ contains
                                    + pinhole%e1(3)**2)
     ! See handwritten SINPA notes for full explanation with 3D drawings
     if (e1mod.lt.0.001) then ! B is in line with u2
+      print*, Bpinhole
       print*, 'B field normal to the pinhole. Option not considered'
       print*, 'Write to jrrueda@us.es'
       stop
@@ -1018,9 +1116,6 @@ contains
     pinhole%e3 = Bpinhole / BpinholeMod
     pinhole%e1 = pinhole%e1 / e1mod
     call vec_product(pinhole%e3,pinhole%e1,pinhole%e2)
-    print*,'e1: ',pinhole%e1
-    print*,'e2: ',pinhole%e2
-    print*,'e3: ',pinhole%e3
 
   end subroutine Bsystem
 
@@ -1150,7 +1245,7 @@ contains
         call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
                          particle%position(:, istep), particle%position(:, istep + 1), &
                          particle%collision, particle%collision_point)
-        if (part%collision) then
+        if (particle%collision) then
           particle%kindOfCollision = geometry(iloop)%kind
           exit plates
         endif
@@ -1283,7 +1378,9 @@ contains
     integer :: ii
     ! ---------------------
     ! Read the file
-    print*, 'reading: ', filename
+    if (verb) then
+      print*, 'reading: ', filename
+    endif
     open(unit = 60, file = filename, form = 'formatted', status='old', action='read')
     read(60, *) g_element%name
     read(60, *) line  ! Dummy descritption name
@@ -1332,7 +1429,7 @@ contains
     deallocate(buffer)
   end subroutine parseGeometry
 
-  subroutine readGeometry(geomID, n, verb)
+  subroutine readGeometry(GeomFolder, n, verb)
     ! -----------------------------------------------------------------------
     ! Prepare the geometry elements
     !> \brief Prepare the geometry elements
@@ -1346,7 +1443,7 @@ contains
     ! -----------------------------------------------------------------------
     implicit none
     ! Dummy variables
-    character (len=*), intent(in) :: geomID  !< ID of the geometry to read
+    character (len=*), intent(in) :: GeomFolder  !< ID of the geometry to read
     integer, intent(in) :: n   !< Number of elements to read
     logical, intent(in):: verb !< Write to console some info.
 
@@ -1355,15 +1452,15 @@ contains
     integer:: ierr  !< error storing variable
     integer:: pinholeKind !< kind of pinhole (namelist variables)
     real(8), dimension(3) :: u1, u2, u3, rPin !< variables for the namelist
-    real(8) :: d1, d2 !< kind of pinhole (namelist variables)
+    real(8) :: d1, d2 !< pinhole sizes (namelist variables)
     character (len=1000) :: dummy_string, err_str, geometry_dir !< dummy strings
     character (len=1) :: number !< number where to save the element we are reading
 
     NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, ScintNormal, rotation, pinholeKind
 
     ! Read namelist and configure the plates
-    geometry_dir = trim(SINPA_dir)//'Geometry/'
-    open (unit=60, file=trim(geometry_dir)//geomID//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
+
+    open (unit=60, file=trim(GeomFolder)//'/ExtraGeometryParams.txt',form='formatted',iostat=ierr)
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
 
@@ -1372,9 +1469,12 @@ contains
     allocate(geometry(n))
     do i = 1,n
       write(number, '(I1)') i
-      dummy_string = trim(geometry_dir)//geomID//'/Element'//number//'.txt'
+      dummy_string = trim(GeomFolder)//'/Element'//number//'.txt'
       call parseGeometry(trim(dummy_string),verb, geometry(i))
     enddo
+    if (geometry(n)%kind .ne. 2) then
+      stop 'Last geometric element should be the Scintillator!!! Revise namelist'
+    endif
 
     ! Fill the pinhole object
     pinhole%u1 = u1
@@ -1398,23 +1498,27 @@ contains
 !------------------------------------------------------------------------------
 ! SECTION 7: FIDASIM compatibility
 !------------------------------------------------------------------------------
-  subroutine readFIDASIM4Markers(filename)
+  subroutine readFIDASIM4Markers(filename, verbose)
     ! -----------------------------------------------------------------------
     ! Load a FIDASIM npa file
     !> \brief Load markers from a FIDASIM simulation
     ! Written by Jose Rueda
     ! When executed, it set in the code workspace:
     !   - F4Markers !< Structure with NPA data
-    !
+    !   - verbose !< flag to print some info
     ! -----------------------------------------------------------------------
 
     ! Dummy variables:
     character(*), intent(in) :: filename !< Name of the file with the markers
+    logical, intent(in) :: verbose
+
     ! Local variables:
     real(4), dimension(:), allocatable:: dummy1D
     real(4), dimension(:, :), allocatable:: dummy2D
 
-    print*, 'Reading markers info from: ', trim(filename)
+    if (verbose) then
+      print*, 'Reading markers info from: ', trim(filename)
+    endif
     open(60, file=trim(filename), action='read',access='stream')
     read(60) F4Markers%shot_number
     read(60) F4Markers%time
@@ -1430,16 +1534,18 @@ contains
     allocate(F4Markers%wght(F4Markers%counter))
     allocate(F4Markers%kind(F4Markers%counter))
     read(60) dummy2D
-    F4Markers%ipos = transpose(dble(dummy2D))
+    F4Markers%ipos = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy2D
-    F4Markers%fpos = transpose(dble(dummy2D))
+    F4Markers%fpos = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy2D
-    F4Markers%v = transpose(dble(dummy2D))
+    F4Markers%v = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy1D
     F4Markers%wght = dble(dummy1D)
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
-    print*, F4Markers%counter, 'markers to be follwed'
+    if (verbose) then
+      print*, F4Markers%counter, '*', nResampling, 'markers to be follwed'
+    endif
   end subroutine readFIDASIM4Markers
 
  !------------------------------------------------------------------------------
@@ -1464,6 +1570,8 @@ contains
    real(8), intent(in):: rli !< Gyroradius of the particle
    !---
    real(8):: distance
+   ! real(8):: randnumberaux
+   ! real(8):: projection
    ! Clean the marker position and trajectory
    part%position(:, :) = 0.0d0
    part%velocity(:, :) = 0.0d0
@@ -1493,7 +1601,6 @@ contains
     ! Init marker velocity
     part%beta = beta_min + ran(3) * dbeta
     if (FILDSIMmode) then
-
       part%velocity(:, 1) = vmod * (sqrt(1-xxi**2) * (cos(part%beta)*pinhole%e1 + &
                                                       sin(part%beta)*pinhole%e2) +&
                                     xxi * pinhole%e3)

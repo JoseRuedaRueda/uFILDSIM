@@ -1,2 +1,8 @@
+** 0.3 Namelist update:
+- Default values are defined for namelist parameters, no need of giving all parameters like inputs
+- GeomID changed to geomFolder: Now we would need to give the program the whole path to the folder with the element files and not just the geomID
+- SINPA_dir changed to runFolder: Now instead the root directory of the SINPA code, the fortran code need the folder containing the run (the parent folder for the inputs/results) This is included to gain flexibility with the SINPA execution to remap FILD frames
+- Gyroradius and XI arrays are sorted in th fortran code, such that there is no 'issues' with their reading in python
+
 ** 0.2 Backtracing:
 - Included a flag to allow for backtracing in the namelist (the flag is called backtrace). The backtrace is just included reversing the sign of the time step in the integration

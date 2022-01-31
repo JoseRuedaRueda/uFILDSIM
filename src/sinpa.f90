@@ -12,8 +12,8 @@
 ! MODULE        : Main Core
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 01/10/2021
-!> \version 0.1
+!> \date 21/01/2022
+!> \version 0.2
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -55,11 +55,14 @@ program sinpa
   ! Allocate the gyroradius and pitch arrays to be readed
   allocate (rl(nGyroradius))
   allocate (XI(nxi))
+  allocate (XI_input(nxi))
   ! Read the input namelist
   open (unit=60, file=input_filename, form='formatted', iostat=ierr)
   read(60, NML=inputParams, iostat = ierr)
   close(60)
-
+  ! Sort the arrays
+  call quicksort_nr(XI)
+  call quicksort_nr(rl)
   ! Read the specifict namelist depending on the diagnostic
   if (FILDSIMmode.eqv..False.) then
     open (unit=60, file=input_filename, form='formatted', iostat=ierr)
@@ -80,7 +83,7 @@ program sinpa
     print*,'------------------------------------------------------------------'
   endif
   ! --- Set the geometry
-  call readGeometry(trim(geomID), nGeomElements, verbose)
+  call readGeometry(trim(GeomFolder), nGeomElements, verbose)
   if (verbose) then
     print*,'------------------------------------------------------------------'
     print*,'Setting up the geometry of the plates and scintillator'
@@ -89,8 +92,8 @@ program sinpa
   endif
 
   ! --- Load the grid and magnetic field
-  call parseField(trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/field.bin',&
-                  trim(SINPA_dir)//'/runs/'//trim(runID)//'/inputs/Efield.bin',&
+  call parseField(trim(runFolder)//'/inputs/field.bin',&
+                  trim(runFolder)//'/inputs/Efield.bin',&
                   verbose)
   call Bsystem()
   if (verbose) then
@@ -101,9 +104,10 @@ program sinpa
   endif
 
   ! --- Translate from FILDSIM pitch criteria to decent one
+  XI_input = XI
   if (FILDSIMmode) then
     ! Keep the crazy FILDSIM criteria
-    XI = dble(IpBt) * cos(XI*pi/180.0d0)
+    XI = dble(IpBt) * cos(XI_input*pi/180.0d0)
   endif
   ! --- Caclualte the beta (gyrophases) for all X values
   call calculate_betas()  ! This is in beta, not used at the moment
@@ -136,19 +140,19 @@ program sinpa
     dummy_shape = shape(Strike)
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
-    open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+    open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, transfer(FILDSIMmode, 1), dummy_shape(1)
+    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape(1)
     ! -- Strike points on the collimator
     if (save_collimator_strike_points) then
-      open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+      open(unit=62, file=trim(runFolder)//&
            '/results/'//trim(runID)//'.spcmap', access = 'stream', action='write', status='replace')
-      write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI, 4
+      write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, 4
     endif
     ! -- File to save the orbits
     if (saveOrbits) then
-      open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+      open(unit=63, file=trim(runFolder)//&
            '/results/'//trim(runID)//'.orb', access = 'stream', action='write', status='replace')
       write(63) versionID1, versionID2, runID
       if (saveOrbitLongMode) then
@@ -247,17 +251,18 @@ program sinpa
                     part%position(:, istep+1) = part%collision_point
                     cOrb = cOrb + 1
                     call saveOrbit(63, part, istep+1, saveOrbitLongMode)
-
                   endif
                 endif
                 cycle Lmarkers
-              else ! we collided with the foil
+              elseif (part%kindOfCollision .eq. 1) then ! we collided with the foil
                 part%collision = .False.
                 part%dt = dt   ! Good dt to evolve an ion
                 part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
                 part%position(:, istep + 1) = part%collision_point
                 r0 = part%collision_point
                 cFoil = cFoil + 1 ! Update the counter
+              else
+                print*, 'Warning we collide with element of kind', part%kindOfCollision
               endif
             endif
           enddo tracking
@@ -284,14 +289,14 @@ program sinpa
         if (verbose) then
           print*, '-----'
           if (FILDSIMmode) then
-            print*, 'Gyroradius:', rL(irl), ' Alpha:', 180.0*acos(XI(iXI)/IpBt)/pi
+            print*, 'Gyroradius:', rL(irl), ' Pitch:', int(180.0*acos(XI(iXI)/IpBt)/pi)
           else
             print*, 'Gyroradius:', rL(irl), ' Alpha:', XI(iXI)
-            print*, ' Hitting Foil', cFoil
+            print*, 'Hitting Foil', cFoil
           endif
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
-          print*, 'Wrong markers', nMap - cCollimator - cScintillator
+          print*, 'Not colliding', nMap - cCollimator - cScintillator
         endif
         ! Save the strike map (average everything)
         ! ToDo: correct collimator factor for the interval or launched gyrophase
@@ -327,8 +332,8 @@ program sinpa
     print*,'It took (in seconds): ', t_final_orbits - t_initial_orbits
     ! Write the strike map
     print*,'Saving strike map in: '
-    print*,trim(SINPA_dir)//'/runs/'//trim(runID)//'/results/'//trim(runID)//'.map'
-    open(unit=60, file=trim(SINPA_dir)//'/runs/'//trim(runID)//'/results/'&
+    print*,trim(runFolder)//'/results/'//trim(runID)//'.map'
+    open(unit=60, file=trim(runFolder)//'/results/'&
       //trim(runID)//'.map', action='write', form='formatted')
     ! Write the header
     write(60,'(a,2x,a)') 'Simulation NAMELIST: ', trim(input_filename)
@@ -372,25 +377,39 @@ program sinpa
   !=============================================================================
   !-----------------------------------------------------------------------------
   signal_part: if (signal) then
-    ! Fist load the FIDASIM simulation
-    call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin")
+    if (verbose) then
+      print*, '-----------------------------------------------------------------'
+      print*,'Performing mapping'
+    endif
+    ! Fist load the markers simulation
+    if (FILDSIMmode) then
+      print*, "sorry not implemented"
+    else
+      call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin", verbose)
+    endif
     ! --- Open the file to save the data
     ! -- Strike points on the scintillator
-    open(unit=61, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+    open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, 15
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 15
     ! -- Strike points on the collimator
-    open(unit=62, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
+    open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
     write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0,4
     ! -- File to save the orbits
     if (saveOrbits) then
-      open(unit=63, file=trim(SINPA_dir)//'/runs/'//trim(runID)//&
-           '/results/SignalOrbits.bin', access = 'stream', action='write')
+      open(unit=63, file=trim(runFolder)//&
+           '/results/'//trim(runID)//'.orbsignal', access = 'stream', action='write')
       write(63) versionID1, versionID2, runID
+      if (saveOrbitLongMode) then
+        write(63) 69
+      else
+        write(63) 6
+      endif
     endif
     ! --- Allocate the particle:
+    call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
     dt = 2 * pi / OmegaPart / nGyro
     part%n_t = int(maxT/dt)
@@ -401,8 +420,8 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(15,F4Markers%counter))            ! Strike points in the scint
-    allocate(CollimatorStrikes(4,F4Markers%counter))       ! Strike position on the coll
+    allocate(Strike(15,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     ! -- Initialise all the counters
     cScintillator = 0
     cCollimator = 0
@@ -410,83 +429,101 @@ program sinpa
     cWrongNeutral = 0
     cFoil = 0
     markers: do i=1, F4Markers%counter
-      ! Initialise the markers
-      ! - Clean the marker data
-      part%position(:, :) = 0.0d0
-      part%velocity(:, :) = 0.0d0
-      part%collision     = .False.
-      part%kindOfCollision = 9  ! Just initialise it to a dummy value
-      ! - FIDASIM data
-      part%weight         = F4Markers%wght(i)
-      part%position(:,1) = F4Markers%fpos(:, i)
-      part%velocity(:,1) = F4Markers%v(:, i)
-      ! - dt and charge
-      part%dt    = dt1
-      part%qm    = Zin *qe / M /amu_to_kg
-      signal_tracking: do istep = 1, part%n_t-1
-        call pushParticle(part%qm, part%position(:, istep), &
-                          part%velocity(:, istep), &
-                          part%position(:, istep + 1),&
-                          part%velocity(:, istep + 1), part%dt)
-        call checkCollision(part)
-        ! If it has collided, do stuff
-        if (part%collision) then
-          if (part%kindOfCollision .eq. 0) then
-            ! Collided with the collimator, dead marker
-            cCollimator = cCollimator + 1
-            CollimatorStrikes(1:3, cCollimator) = part%collision_point
-            CollimatorStrikes(4, cCollimator) = part%weight
-            cycle markers
-            if (saveOrbits) then
-              call random_number(rand_number)
-              if (rand_number .lt. saveRatio) then
-                cOrb = cOrb + 1
-                write(63) istep
-                write(63) transpose(part%position(:, 1:istep))
+      resample: do j=1, nResampling
+        ! Initialise the markers
+        ! - Clean the marker data
+        part%position(:, :) = 0.0d0
+        part%velocity(:, :) = 0.0d0
+        part%collision     = .False.
+        part%kindOfCollision = 9  ! Just initialise it to a dummy value
+        ! - FIDASIM data
+        part%weight        = F4Markers%wght(i) / nResampling
+        part%velocity(:,1) = F4Markers%v(:, i)
+        ! Resample the position (only valid for circular pinholes)
+        pos1 = pinhole%r + pinhole%d1*(20.0d0*pinhole%u1 + 20.0d0*pinhole%u2)
+        do while (sqrt(sum((pos1-pinhole%r)**2)) .gt.  pinhole%d1)
+          call random_number(ran)
+          pos1 = pinhole%r+ pinhole%d1*((-1+2*ran(2))*pinhole%u1+(-1+2*ran(3))*pinhole%u2)
+        end do
+        part%position(:,1) = pos1
+
+        ! - dt and charge
+        part%dt    = dt1
+        part%qm    = Zin * qe / M /amu_to_kg
+        signal_tracking: do istep = 1, part%n_t-1
+          call pushParticle(part%qm, part%position(:, istep), &
+                            part%velocity(:, istep), &
+                            part%position(:, istep + 1),&
+                            part%velocity(:, istep + 1), part%dt)
+          call checkCollision(part)
+          ! If it has collided, do stuff
+          if (part%collision) then
+            if (part%kindOfCollision .eq. 0) then
+              ! Collided with the collimator, dead marker
+              cCollimator = cCollimator + 1
+              CollimatorStrikes(1:3, cCollimator) = part%collision_point
+              CollimatorStrikes(4, cCollimator) = part%weight
+
+              if (saveOrbits) then
+                call random_number(rand_number)
+                if (rand_number .lt. saveRatio) then
+                  ! Save the collision point in the trajectory for future use
+                  part%position(:, istep+1) = part%collision_point
+                  cOrb = cOrb + 1
+                  call saveOrbit(63, part, istep+1, saveOrbitLongMode)
+                endif
               endif
-            endif
-          elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
-            cScintillator = cScintillator + 1 ! Update counter
-            Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
-            Strike(2:4, cScintillator ) = part%collision_point ! f point
-            Strike(5:7, cScintillator ) = &
-              MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
-            Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
-            Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
-            Strike(14,cScintillator) = part%weight ! weight
-            Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
-            if (saveOrbits) then
-              call random_number(rand_number)
-              if (rand_number .lt. saveRatio) then
-                cOrb = cOrb + 1
-                write(63) istep
-                write(63) transpose(part%position(:, 1:istep))
+              cycle resample
+
+            elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+              cScintillator = cScintillator + 1 ! Update counter
+              Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
+              Strike(2:4, cScintillator ) = part%collision_point ! f point
+              Strike(5:7, cScintillator ) = &
+                MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
+              Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
+              Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
+              Strike(14,cScintillator) = part%weight ! weight
+              Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
+              if (saveOrbits) then
+                call random_number(rand_number)
+                if (rand_number .lt. saveRatio) then
+                  ! Save the collision point in the trajectory for future use
+                  part%position(:, istep+1) = part%collision_point
+                  cOrb = cOrb + 1
+                  call saveOrbit(63, part, istep+1, saveOrbitLongMode)
+                endif
               endif
+              cycle resample
+            elseif (part%kindOfCollision .eq. 1) then ! we collided with the foil
+              part%collision = .False.
+              part%dt = dt   ! Good dt to evolve an ion
+              part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
+              part%position(:, istep + 1) = part%collision_point
+              cFoil = cFoil + 1 ! Update the counter
+            else
+              print*, 'Warning we collide with element of kind', part%kindOfCollision
             endif
-            cycle markers
-          else ! we collided with the foil
-            part%collision = .False.
-            part%dt = dt   ! Good dt to evolve an ion
-            part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
-            part%position(:, istep + 1) = part%collision_point
-            r0 = part%collision_point
-            cFoil = cFoil + 1 ! Update the counter
           endif
-        endif
-      enddo signal_tracking
+        enddo signal_tracking
+      enddo resample
     end do markers
     write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
-    write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+    if (save_collimator_strike_points) then
+      write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+    endif
     if (verbose) then
       print*, '-----'
       print*, 'Hitting Collimator', cCollimator
       print*, 'Hitting Scintillator', cScintillator
-      print*, 'Wrong Neutrals', cWrongNeutral
-      print*, 'Wrong Ions', cWrongIons
+      print*, 'Not colliding Neutrals', cWrongNeutral
+      print*, 'Not colliding Ions', cWrongIons
       print*, 'hitting foil', cFoil
     endif
     close(61)
-    close(62)
+    if (save_collimator_strike_points) then
+      close(62)
+    endif
     deallocate(part%position)
     deallocate(part%velocity)
     deallocate(Strike)
