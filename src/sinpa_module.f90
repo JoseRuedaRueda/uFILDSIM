@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 0  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -140,6 +140,8 @@ module sinpa_module
     real(8), dimension(3):: e1  !< Normal to the B field at pinhole 1
     real(8), dimension(3):: e2  !< Normal to the B field at pinhole 2
     real(8), dimension(3):: e3  !< Parallel to the B field at pinhole
+
+    real(8):: eta  !< angle (rad) between u3 and B
   end type pinhole_system_type
   ! ---------------------------------------------------------------------------
   ! Interfaces
@@ -209,6 +211,7 @@ module sinpa_module
 
   ! --- Others
   integer:: ierr !< error management
+  integer:: nToLaunch !< number of markers to ba launched
   integer:: irl, iXI, imc, istep, iistep, i, j!< dummy for loops
   real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
@@ -224,11 +227,11 @@ module sinpa_module
   real(8) :: dMin  !< minimum distance to NBI of markers trajectories
   real(8), dimension(3) :: posMin  !< position to minimum distance to NBI of the mapping marker
   type(pinhole_system_type) :: pinhole !< pinhole definition
-  integer, dimension(2):: dummy_shape !< to get the size of the strike object
+  integer:: dummy_shape !< to get the size of the strike object
   real(8) :: time_sign !< sign for dt (>0 forward modelling, <0 backtrace)
 
   ! --- FILDSIM mode
-  real(8), dimension(:), allocatable::min_beta, delta_beta
+  real(8), dimension(:), allocatable::min_beta, delta_beta, marker_factor
 
   ! --- Timing
   real(8) :: t_initial_orbits  !< Time were orbits calculation start
@@ -243,7 +246,9 @@ module sinpa_module
   integer:: nGeomElements !< Number of geometrical elements
   integer:: nxi !< number of pitches (R) to simulate
   integer:: nGyroradius !< number of energies (gyroradius) to simulate
-  integer:: nMap = 5000 !< number of markers per energy-pitch for the map
+  integer:: nMap = 5000 !< number 0 of markers per energy-pitch for the map
+  real(8):: n1 = 0.0d0 !< n1 factor for the calculation of the number of markers
+  real(8):: r1 = 0.0d0 !< r1 factor for the calculation of the number of markers
   logical:: mapping = .True.!< flag to decide if we launch mapping markers
   logical:: signal = .False.!< flag to decide if we follow FIDASIM4 markers
   logical:: resampling = .False.!< flag to decide if we resample FIDASIM markers
@@ -259,14 +264,15 @@ module sinpa_module
   logical :: flag_efield_on = .false.!< include or not electric field
   logical :: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical :: backtrace = .false.!< flag to trace back the orbits
+  logical :: restrict_mode = .false. !< flag to restrict the initial gyrophase
 
 
   ! Namelist
-  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nGeomElements, nxi, nGyroradius, &
-    nMap, mapping,&
+  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nGeomElements, nxi, &
+    nGyroradius, nMap, n1, r1, mapping, &
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
-    backtrace
+    backtrace,restrict_mode
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -523,92 +529,92 @@ contains
 ! stack, and moving directly to calculate the smaller "half",
 ! it can guarantee that the stack needs no more than log_2(N)
 ! entries
-subroutine quicksort_nr(array)
-  implicit none
-  real(8), intent(inout)::array(:)
-  real(8) :: temp,pivot
-  integer :: i, j, left,right,low,high
-  ! If your compiler lacks storage_size(), replace
-  ! storage_size(i) by 64
-  integer :: stack(2,storage_size(i)),stack_ptr
+  subroutine quicksort_nr(array)
+    implicit none
+    real(8), intent(inout)::array(:)
+    real(8) :: temp,pivot
+    integer :: i, j, left,right,low,high
+    ! If your compiler lacks storage_size(), replace
+    ! storage_size(i) by 64
+    integer :: stack(2,storage_size(i)),stack_ptr
 
-  low=1
-  high=size(array)
-  stack_ptr=1
+    low=1
+    high=size(array)
+    stack_ptr=1
 
-  do
-     if (high-low.lt.50) then ! use insertion sort on small arrays
-        do i=low+1,high
-           temp=array(i)
-           do j=i-1,low,-1
-              if (array(j).le.temp) exit
-              array(j+1)=array(j)
-           enddo
-           array(j+1)=temp
-        enddo
-        ! now pop from stack
-        if (stack_ptr.eq.1) return
-        stack_ptr=stack_ptr-1
-        low=stack(1,stack_ptr)
-        high=stack(2,stack_ptr)
-        cycle
-     endif
+    do
+       if (high-low.lt.50) then ! use insertion sort on small arrays
+          do i=low+1,high
+             temp=array(i)
+             do j=i-1,low,-1
+                if (array(j).le.temp) exit
+                array(j+1)=array(j)
+             enddo
+             array(j+1)=temp
+          enddo
+          ! now pop from stack
+          if (stack_ptr.eq.1) return
+          stack_ptr=stack_ptr-1
+          low=stack(1,stack_ptr)
+          high=stack(2,stack_ptr)
+          cycle
+       endif
 
-     ! find median of three pivot
-     ! and place sentinels at first and last elements
-     temp=array((low+high)/2)
-     array((low+high)/2)=array(low+1)
-     if (temp.gt.array(high)) then
-        array(low+1)=array(high)
-        array(high)=temp
-     else
-        array(low+1)=temp
-     endif
-     if (array(low).gt.array(high)) then
-        temp=array(low)
-        array(low)=array(high)
-        array(high)=temp
-     endif
-     if (array(low).gt.array(low+1)) then
-        temp=array(low)
-        array(low)=array(low+1)
-        array(low+1)=temp
-     endif
-     pivot=array(low+1)
+       ! find median of three pivot
+       ! and place sentinels at first and last elements
+       temp=array((low+high)/2)
+       array((low+high)/2)=array(low+1)
+       if (temp.gt.array(high)) then
+          array(low+1)=array(high)
+          array(high)=temp
+       else
+          array(low+1)=temp
+       endif
+       if (array(low).gt.array(high)) then
+          temp=array(low)
+          array(low)=array(high)
+          array(high)=temp
+       endif
+       if (array(low).gt.array(low+1)) then
+          temp=array(low)
+          array(low)=array(low+1)
+          array(low+1)=temp
+       endif
+       pivot=array(low+1)
 
-     left=low+2
-     right=high-1
-     do
-        do while(array(left).lt.pivot)
-           left=left+1
-        enddo
-        do while(array(right).gt.pivot)
-           right=right-1
-        enddo
-        if (left.ge.right) exit
-        temp=array(left)
-        array(left)=array(right)
-        array(right)=temp
-        left=left+1
-        right=right-1
-     enddo
-     if (left.eq.right) left=left+1
-     !          call quicksort(array(1:left-1))
-     !          call quicksort(array(left:))
-     if (left.lt.(low+high)/2) then
-        stack(1,stack_ptr)=left
-        stack(2,stack_ptr)=high
-        stack_ptr=stack_ptr+1
-        high=left-1
-     else
-        stack(1,stack_ptr)=low
-        stack(2,stack_ptr)=left-1
-        stack_ptr=stack_ptr+1
-        low=left
-     endif
+       left=low+2
+       right=high-1
+       do
+          do while(array(left).lt.pivot)
+             left=left+1
+          enddo
+          do while(array(right).gt.pivot)
+             right=right-1
+          enddo
+          if (left.ge.right) exit
+          temp=array(left)
+          array(left)=array(right)
+          array(right)=temp
+          left=left+1
+          right=right-1
+       enddo
+       if (left.eq.right) left=left+1
+       !          call quicksort(array(1:left-1))
+       !          call quicksort(array(left:))
+       if (left.lt.(low+high)/2) then
+          stack(1,stack_ptr)=left
+          stack(2,stack_ptr)=high
+          stack_ptr=stack_ptr+1
+          high=left-1
+       else
+          stack(1,stack_ptr)=low
+          stack(2,stack_ptr)=left-1
+          stack_ptr=stack_ptr+1
+          low=left
+       endif
 
-  enddo
-end subroutine quicksort_nr
+    enddo
+  end subroutine quicksort_nr
 !-------------------------------------------------------------------------------
 ! SECTION 2: NBI
 !-------------------------------------------------------------------------------
@@ -834,7 +840,9 @@ end subroutine quicksort_nr
     read(60) Bzfield
     close(60)
     if (flag_efield_on) then
-      print*, 'reading:', Ename
+      if (verbose_flag) then
+        print*, 'reading:', Ename
+      endif
       open(unit = 60, file=Ename, access='stream', status='old', action='read')
       read(60) lr1, lz1, lphi1, ntot1, &
                rmin, rmax, zmin, zmax, phimin, phimax, timemin, timemax
@@ -843,7 +851,9 @@ end subroutine quicksort_nr
         close(60)
         stop
       endif
-      print*, 'parsing electrinc field'
+      if (verbose_flag) then
+        print*, 'parsing electrinc field'
+      endif
       allocate(Erfield(lr, lphi, lz, ntot))
       allocate(Ezfield(lr, lphi, lz, ntot))
       allocate(Ephifield(lr, lphi, lz, ntot))
@@ -1116,7 +1126,10 @@ end subroutine quicksort_nr
     pinhole%e3 = Bpinhole / BpinholeMod
     pinhole%e1 = pinhole%e1 / e1mod
     call vec_product(pinhole%e3,pinhole%e1,pinhole%e2)
-
+    ! save the angle eta
+    pinhole%eta = acos(pinhole%e3(1)*pinhole%u3(1) &
+                       + pinhole%e3(2)*pinhole%u3(2) &
+                       + pinhole%e3(3)*pinhole%u3(3))
   end subroutine Bsystem
 
 !-------------------------------------------------------------------------------
@@ -1614,7 +1627,7 @@ end subroutine quicksort_nr
     endif
  end subroutine initMarker
 
- subroutine calculate_betas()
+ subroutine calculate_betas(flag)
    ! -----------------------------------------------------------------------
    ! Calculate the beta angles to be used
    !> \brief calculate the beta intervas to be latter used
@@ -1622,51 +1635,64 @@ end subroutine quicksort_nr
    ! When executed, it set in the code workspace:
    !   - min_beta !< Array with beta angles for the simulation
    !   - delta_beta !< array with deltas for the beta angle
-   ! Note: if in the input namelist, the dAngle is larger than 0.001, the
-   ! namelist values will be used and this will be ignored
+   !
    ! -----------------------------------------------------------------------
-
+   ! Dummy variables
+   logical, intent(in):: flag
    ! local variables
-   real(8), dimension(50):: gyrop
-   real(8), dimension(3):: dummy_v
-   logical, dimension(50):: flags
-   real(8)::step
-   integer::ilocal
-   integer::dummy_counter=0
-   allocate(min_beta(nxi))
-   allocate(delta_beta(nxi))
-   if (dAngle .gt. 0.001) then
-      min_beta(:) = minAngle
-      delta_beta(:) = dAngle
-   else
-     step = 2*pi/50.0d0
-     do ilocal = 1, 50
-       gyrop(ilocal) = -pi + (dble(ilocal)-1.0d0)*step + 0.001d0
-     end do
+   integer:: jj
+   real(8):: aux, aux2, dum_beta, dum_beta_max
+   real(8):: epsilon=1e-6
 
-     do iXI = 1, nxi
-       flags(:) = .False.
-       dummy_counter = 0
-       do i = 1, 50
-         dummy_v = sqrt(1-XI(iXI)**2) * (cos(gyrop(i))*pinhole%e1 + &
-                                                 sin(gyrop(i))*pinhole%e2) +&
-                   XI(iXI) * pinhole%e3
-         if (sum(dummy_v * pinhole%u3) .lt. 0.0d0) then
-           flags(i) = .True.
-           dummy_counter = dummy_counter + 1
+   ! Allocate the arrays
+   allocate(marker_factor(nXI))
+   allocate(min_beta(nXI))
+   allocate(delta_beta(nXI))
+
+   if (flag) then  ! The 'secure mode'
+     do jj=1, nXI
+       if ((abs(pinhole%eta) .le. epsilon) .or. (abs(pinhole%eta-pi/2.0d0) .le. epsilon) )then
+         ! Not efficient, I know, @todo
+         min_beta(jj) = minAngle  ! Save the input namelist default
+         delta_beta(jj) = dAngle
+         marker_factor(jj) = 1
+       else
+         aux2 = sqrt(1-XI(jj)**2)
+         if (abs(aux2) .le. epsilon) then
+           min_beta(jj) = minAngle  ! Save the input namelist default
+           delta_beta(jj) = dAngle
+           marker_factor(jj) = 1
+         else
+           aux = -1.0d0*DBLE(IpBt)*XI(jj)*aux2*cos(pinhole%eta)/abs(sin(pinhole%eta))
+           if (aux .ge. 1.0d0) then  ! all can enter
+             min_beta(jj) = minAngle  ! Save the input namelist default
+             delta_beta(jj) = dAngle
+             marker_factor(jj) = 1
+           else if (aux .le. -1.0d0) then ! Nothing can enter
+             marker_factor(jj) = 0
+             min_beta(jj) = minAngle  ! Save the input namelist default
+             delta_beta(jj) = dAngle
+           else ! Normal case
+             dum_beta = asin(aux)
+             if (dum_beta .ge. 0.0d0) then
+               print*, XI_input(jj)
+               print*, dum_beta
+               print*, 'Option not implemented, contat jrrueda@us.es '
+               stop
+             else
+               min_beta(jj) = max(pi + abs(dum_beta), minAngle)
+               dum_beta_max = min(2.0d0*pi + dum_beta, dAngle + minAngle)
+               delta_beta(jj) = dum_beta_max - min_beta(jj)
+               marker_factor(jj) = 1
+
+             endif
+           endif
          endif
-       end do
-       min_beta(iXI) = minval(gyrop,mask=flags)
-       delta_beta(iXI) = maxval(gyrop, mask=flags) - min_beta(iXI)
-       if (delta_beta(iXI) .lt. 0.001) then ! We are in the weird case
-         min_beta(iXI) = minval(gyrop+pi,mask=flags)
-         delta_beta(iXI) = maxval(gyrop+pi, mask=flags) - min_beta(iXI)
-
-       end if
-       if (dummy_counter .eq. 0) then
-        print*, 'Not possible gyrophase range for: ', XI(iXI)
        endif
-     end do
+     enddo
+   else
+     min_beta(:) = minAngle  ! Save the input namelist default
+     delta_beta(:) = dAngle
    endif
  end subroutine calculate_betas
 

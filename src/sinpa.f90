@@ -110,7 +110,10 @@ program sinpa
     XI = dble(IpBt) * cos(XI_input*pi/180.0d0)
   endif
   ! --- Caclualte the beta (gyrophases) for all X values
-  call calculate_betas()  ! This is in beta, not used at the moment
+  if (minAngle .le. 0.0d0) then
+    minAngle = minAngle + 2.0d0*pi
+  endif
+  call calculate_betas(.True.)  ! This is in beta, not used at the moment
   ! --- Stablish the sign of the dt
   if (backtrace) then
     time_sign = -1.0d0
@@ -129,21 +132,19 @@ program sinpa
     endif
     ! --- Allocate the necesary matrices
     if (FILDSIMmode) then
-      allocate(Strike(12,nMap))            ! Strike points in the scint
       allocate(StrikeMap(9,nGyroradius * nxi))  ! Strike map
+      dummy_shape = 12    ! Get the size (to later write it in the file)
     else
-      allocate(Strike(19,nMap))            ! Strike points in the scint
       allocate(StrikeMap(13,nGyroradius * nxi))  ! Strike map
+      dummy_shape = 19    ! Get the size (to later write it in the file)
     endif
-    allocate(CollimatorStrikes(4,nMap))       ! Strike position on the coll
-    ! Get the size (to later write it in the file)
-    dummy_shape = shape(Strike)
+
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
     open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape(1)
+    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape
     ! -- Strike points on the collimator
     if (save_collimator_strike_points) then
       open(unit=62, file=trim(runFolder)//&
@@ -187,10 +188,21 @@ program sinpa
         cCollimator = 0
         cFoil = 0
         ! -- Clean the matrices with the complete information
+
+        nToLaunch = int(dble(nMap) * marker_factor(iXI) * (1.0d0 + n1/(rL(irl)-r1)**2))
+        if (verbose) then
+          print*,'---'
+          print*, 'Following: ', nToLaunch, ' markers'
+        endif
+        if (FILDSIMmode) then
+          allocate(Strike(12,nToLaunch+1))            ! Strike points in the scint
+        else
+          allocate(Strike(19,nToLaunch+1))            ! Strike points in the scint
+        endif
+        allocate(CollimatorStrikes(4,nToLaunch+1))       ! Strike position on the coll
         CollimatorStrikes(:,:) = 0.0d0
         Strike(:,:) = 0.0d0
-
-        Lmarkers: do  imc = 1, nMap
+        Lmarkers: do  imc = 1, nToLaunch
           call initMarker(v0, dt1, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
 
           tracking: do istep = 1, part%n_t-1
@@ -287,7 +299,6 @@ program sinpa
         endif
         ! Print some information
         if (verbose) then
-          print*, '-----'
           if (FILDSIMmode) then
             print*, 'Gyroradius:', rL(irl), ' Pitch:', int(180.0*acos(XI(iXI)/IpBt)/pi)
           else
@@ -296,7 +307,7 @@ program sinpa
           endif
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
-          print*, 'Not colliding', nMap - cCollimator - cScintillator
+          print*, 'Not colliding', nToLaunch - cCollimator - cScintillator
         endif
         ! Save the strike map (average everything)
         ! ToDo: correct collimator factor for the interval or launched gyrophase
@@ -312,7 +323,7 @@ program sinpa
           sum(Strike(5, :)) / cScintillator   ! Average initial gyrophase (beta)
         StrikeMap(7, iXI + (irl - 1) * nxi) = cScintillator ! N strikes
         StrikeMap(8, iXI + (irl - 1) * nxi) = & ! Collimator factor
-          100.0d0 * dble(cScintillator) / dble(nMap)
+          100.0d0 * dble(cScintillator) / dble(nToLaunch) * delta_beta(iXI) / 2.0d0 / pi
         StrikeMap(9, iXI + (irl - 1) * nxi) = &
           sum(Strike(12, :)) / cScintillator   ! Average incident angle
         if (FILDSIMmode.eqv..False.) then
@@ -326,6 +337,8 @@ program sinpa
             sum(Strike(19, :)) / cScintillator
         endif
         ! De-allocate the variables
+        deallocate(Strike)
+        deallocate(CollimatorStrikes)
       enddo LXI
     enddo Lenergies
     call cpu_time(t_final_orbits)
@@ -337,7 +350,7 @@ program sinpa
       //trim(runID)//'.map', action='write', form='formatted')
     ! Write the header
     write(60,'(a,2x,a)') 'Simulation NAMELIST: ', trim(input_filename)
-    write(60,'(a)') '1 # One means the strike map was done with SINPA'
+    write(60,'(i2, i2, a)') versionID1, versionID2, ' # SINPA version'
     if (FILDSIMmode) then
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', &
         'Pitch-Angle (degree)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
@@ -368,8 +381,7 @@ program sinpa
     deallocate(StrikeMap)
     deallocate(part%position)
     deallocate(part%velocity)
-    deallocate(Strike)
-    deallocate(CollimatorStrikes)
+
   endif mapeado
   !-----------------------------------------------------------------------------
   !=============================================================================
