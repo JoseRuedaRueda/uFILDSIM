@@ -25,8 +25,8 @@ module sinpa_module
   !----------------------------------------------------------------------------
   ! PARAMETERS
   !----------------------------------------------------------------------------
-  integer, parameter:: versionID1 = 0  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
+  integer, parameter:: versionID2 = 0  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -110,11 +110,11 @@ module sinpa_module
     character (len=20) :: name  !< NBI name
     real(8), dimension(3) ::  p0  !< Initial point of the NBI
     real(8), dimension(3) ::  u   !< Velocity directoin of the NBI
-    real(8), dimension(3) ::  d   !< distance between points (cm)
-    integer:: npoints  !< Number of poins along the NBI line
-    real(8), dimension(:,:), allocatable :: points !< 3d coordinates of the points
-    real(8), dimension(:), allocatable :: Rpoints !< R coordinate of the points
-    real(8), dimension(:), allocatable :: Phipoints !< Phi coordinate of the points
+    ! real(8), dimension(3) ::  d   !< distance between points (cm)
+    ! integer:: npoints  !< Number of poins along the NBI line
+    ! real(8), dimension(:,:), allocatable :: points !< 3d coordinates of the points
+    ! real(8), dimension(:), allocatable :: Rpoints !< R coordinate of the points
+    ! real(8), dimension(:), allocatable :: Phipoints !< Phi coordinate of the points
   end type NBI_class
 
 
@@ -229,7 +229,8 @@ module sinpa_module
   type(pinhole_system_type) :: pinhole !< pinhole definition
   integer:: dummy_shape !< to get the size of the strike object
   real(8) :: time_sign !< sign for dt (>0 forward modelling, <0 backtrace)
-
+  real(8), dimension(3):: foilNormal
+  real(8) :: incidentProjection
   ! --- FILDSIM mode
   real(8), dimension(:), allocatable::min_beta, delta_beta, marker_factor
 
@@ -240,8 +241,8 @@ module sinpa_module
   ! NAMELIST
   ! --- Configuration file
   ! Dummy variables for the namelist
-  character (len=50) :: runID !< runID
-  character (len=1000) :: GeomFolder !< geometryID
+  character (len=50):: runID !< runID
+  character (len=1000):: GeomFolder !< geometryID
   logical:: FILDSIMmode = .False. !< Flag to use FILDSIM mode or not
   integer:: nGeomElements !< Number of geometrical elements
   integer:: nxi !< number of pitches (R) to simulate
@@ -254,25 +255,25 @@ module sinpa_module
   logical:: resampling = .False.!< flag to decide if we resample FIDASIM markers
   integer:: nResampling = 1 !< Resample number for FIDASIM simulations
   logical:: saveOrbits = .False.!< flag to decide if we save the orbits
-  real(8) :: saveRatio = 0.0d0!< Ratio of orbits to be saved
+  real(8):: saveRatio = 0.0d0!< Ratio of orbits to be saved
   logical:: saveOrbitLongMode = .False. !< Flag to save orbits in long or short format
   logical:: verbose = .True. !< Print information of the run
-  real(8) :: M = 2.0d0!< Mass of the particle, in amu
-  real(8) :: Zin = 1.0d0!< Initial chargeof the particle, in |e|
-  real(8) :: Zout = 1.0d0!< Charge after ionization, in |e|
-  integer :: IpBt = -1!< Sign of the magnetic field vs the current
-  logical :: flag_efield_on = .false.!< include or not electric field
-  logical :: save_collimator_strike_points = .false. !< Save the collimator strike points
-  logical :: backtrace = .false.!< flag to trace back the orbits
-  logical :: restrict_mode = .false. !< flag to restrict the initial gyrophase
-
+  real(8):: M = 2.0d0!< Mass of the particle, in amu
+  real(8):: Zin = 1.0d0!< Initial chargeof the particle, in |e|
+  real(8):: Zout = 1.0d0!< Charge after ionization, in |e|
+  integer:: IpBt = -1!< Sign of the magnetic field vs the current
+  logical:: flag_efield_on = .false.!< include or not electric field
+  logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
+  logical:: backtrace = .false.!< flag to trace back the orbits
+  logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
+  integer:: FoilInteractionModel = 0
 
   ! Namelist
-  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nGeomElements, nxi, &
+  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nxi, &
     nGyroradius, nMap, n1, r1, mapping, &
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
-    backtrace,restrict_mode
+    backtrace,restrict_mode, FoilInteractionModel
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -293,26 +294,15 @@ module sinpa_module
   real(8), dimension(3) :: u2  !< second tangent in the pinhole
 
   ! --- Particle and foil parameters
-  logical:: energyLoss !< Apply energy loss
-  real(8) :: a_SRIM !< First coefficient of SRIM energy loss model
-  real(8) :: b_SRIM !< Second coefficient of SRIM energy loss model
-  logical:: weightChange !< Apply energy loss
-  real(8) :: a_ionization !< First coefficient of ionization model
-  real(8) :: b_ionization !< Second coefficient of ionization model
-  real(8) :: c_ionization !< Third coefficient of ionization model
-  real(8) :: geometricTrans !< Mesh geometric transmission factor
-  logical :: scattering !< apply scatering in the foil
+  real(8), dimension(:), allocatable:: FoilInteractionParameters  !< Foil parameters
   ! Namelist
-  NAMELIST /markerinteractions/ energyLoss, a_SRIM, b_SRIM, weightChange, &
-    a_ionization, b_ionization, c_ionization, geometricTrans, scattering
+  NAMELIST /markerinteractions/ FoilInteractionParameters
 
   ! --- NBI namelist
   ! Dummy variables for namelist
   real(8), dimension(3):: p0, u
-  integer:: npoints
-  real(8):: d
   ! Namelist
-  NAMELIST /nbi_namelist/ p0, u, npoints, d
+  NAMELIST /nbi_namelist/ p0, u
 contains
 
 !-------------------------------------------------------------------------------
@@ -618,42 +608,42 @@ contains
 !-------------------------------------------------------------------------------
 ! SECTION 2: NBI
 !-------------------------------------------------------------------------------
-  subroutine initNBI(filename, nbi)
-    ! ------------------------------------------------------------------
-    ! Initialise the NBI object
-    !> \brief Initialise the NBI object
-    !> \detail Load data from the NBI file and create the series of points
-    ! along the NBI line to be latter used for mapping
-    !
-    ! Written Jose Rueda Rueda
-    ! ------------------------------------------------------------------
-    ! ----
-    ! INPUTS:
-    character (len=*), intent(in):: filename  !< file with NBI data
-    ! Outputs:
-    type(NBI_class), intent(out):: nbi   !< NBI object
-    ! Local variables
-    integer :: ii
-    ! ---
-
-    ! Open the file and read:
-    open(60, file=filename, form = 'formatted', status='old', action='read')
-    read(60, NML=nbi_namelist)
-    close(60)
-    nbi%p0 = p0
-    nbi%u = u
-    nbi%npoints = npoints
-    nbi%d = d
-
-    ! calculate the points along the line
-    allocate(nbi%points(3, npoints))
-    allocate(nbi%Rpoints(npoints))
-    do ii = 1,npoints
-      nbi%points(:, ii) = p0 + ii * u
-      nbi%rpoints(ii) = sqrt(nbi%points(1, ii)**2 + nbi%points(2, ii)**2)
-      nbi%phipoints(ii) = atan2(nbi%points(2, ii), nbi%points(1, ii))
-    end do
-  end subroutine initNBI
+  ! subroutine initNBI(filename, nbi)
+  !   ! ------------------------------------------------------------------
+  !   ! Initialise the NBI object
+  !   !> \brief Initialise the NBI object
+  !   !> \detail Load data from the NBI file and create the series of points
+  !   ! along the NBI line to be latter used for mapping
+  !   !
+  !   ! Written Jose Rueda Rueda
+  !   ! ------------------------------------------------------------------
+  !   ! ----
+  !   ! INPUTS:
+  !   character (len=*), intent(in):: filename  !< file with NBI data
+  !   ! Outputs:
+  !   type(NBI_class), intent(out):: nbi   !< NBI object
+  !   ! Local variables
+  !   integer :: ii
+  !   ! ---
+  !
+  !   ! Open the file and read:
+  !   open(60, file=filename, form = 'formatted', status='old', action='read')
+  !   read(60, NML=nbi_namelist)
+  !   close(60)
+  !   nbi%p0 = p0
+  !   nbi%u = u
+  !   nbi%npoints = npoints
+  !   nbi%d = d
+  !
+  !   ! calculate the points along the line
+  !   allocate(nbi%points(3, npoints))
+  !   allocate(nbi%Rpoints(npoints))
+  !   do ii = 1,npoints
+  !     nbi%points(:, ii) = p0 + ii * u
+  !     nbi%rpoints(ii) = sqrt(nbi%points(1, ii)**2 + nbi%points(2, ii)**2)
+  !     nbi%phipoints(ii) = atan2(nbi%points(2, ii), nbi%points(1, ii))
+  !   end do
+  ! end subroutine initNBI
 
   subroutine minimumDistanceLines(p, v, r, w, d_local, point)
     ! -------------------------------------------------------------------------
@@ -1468,8 +1458,9 @@ contains
     real(8) :: d1, d2 !< pinhole sizes (namelist variables)
     character (len=1000) :: dummy_string, err_str, geometry_dir !< dummy strings
     character (len=1) :: number !< number where to save the element we are reading
+    type(geom_element):: dumGeometry
 
-    NAMELIST /ExtraGeometryParams/ u1, u2, u3, rPin, d1, d2, ps, ScintNormal, rotation, pinholeKind
+    NAMELIST /ExtraGeometryParams/ nGeomElements, u1, u2, u3, rPin, d1, d2, ps, rotation, pinholeKind
 
     ! Read namelist and configure the plates
 
@@ -1484,9 +1475,26 @@ contains
       write(number, '(I1)') i
       dummy_string = trim(GeomFolder)//'/Element'//number//'.txt'
       call parseGeometry(trim(dummy_string),verb, geometry(i))
+      if (geometry(i)%kind .eq. 1) then
+        call vec_product(geometry(i)%triangles(1, 1, :),  geometry(i)%triangles(1, 2, :), foilNormal)
+        foilNormal = foilNormal / sqrt(sum(foilNormal**2))
+      elseif (geometry(i)%kind .eq. 2) then
+        call vec_product(geometry(i)%triangles(1, 1, :),  geometry(i)%triangles(1, 2, :), ScintNormal)
+        ScintNormal = ScintNormal / sqrt(sum(foilNormal**2))
+      endif
     enddo
+    ! Ensure the scintillator to be the last element
     if (geometry(n)%kind .ne. 2) then
-      stop 'Last geometric element should be the Scintillator!!! Revise namelist'
+      exploreGeom: do i = 1,n-1
+        if (geometry(i)%kind .eq. 2) then
+          dumGeometry = geometry(n)
+          geometry(n) = geometry(i)
+          geometry(i) = dumGeometry
+          print*, 'Scintillator was not the last element'
+          print*, 'last element was now placed in position ', i
+          print*, 'Scintillator now placed as the last element'
+        endif
+      enddo exploreGeom
     endif
 
     ! Fill the pinhole object
@@ -1636,6 +1644,8 @@ contains
    !   - min_beta !< Array with beta angles for the simulation
    !   - delta_beta !< array with deltas for the beta angle
    !
+   ! For INPA should be always zero, as there is no 'safety issues' the markers
+   ! enter like neutral particles, so no much to be done
    ! -----------------------------------------------------------------------
    ! Dummy variables
    logical, intent(in):: flag
@@ -1693,6 +1703,7 @@ contains
    else
      min_beta(:) = minAngle  ! Save the input namelist default
      delta_beta(:) = dAngle
+     marker_factor(:) = 1
    endif
  end subroutine calculate_betas
 
@@ -1727,4 +1738,63 @@ contains
      write(fid) transpose(marker_to_save%velocity(:, 1:step_to_save))
    endif
  end subroutine saveOrbit
+
+ !------------------------------------------------------------------------------
+ ! SECTION 10: Foil interaction
+ !------------------------------------------------------------------------------
+ subroutine foilInteraction(MC_marker, normal, step)
+   ! -----------------------------------------------------------------------
+   ! Save the orbit
+   !> \brief Apply the interaction to the marker
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - interactionModel: integer specifiying the model which should be applied
+   !  - MC_marker: markers to be modified
+   !  - normal: normal vector to the carbon foil
+   !  - step: step where the collision have taken place
+   ! -----------------------------------------------------------------------
+   ! Dummy variables
+   type(marker), intent(inout):: MC_marker
+   real(8), dimension(3), intent(in):: normal
+   integer, intent(in):: step
+   ! Local variables
+   real(8):: modV  !< velocity modulus
+   real(8):: Energy !< Energy of the particle, in keV
+   real(8), dimension(3):: localV  !< Dummy copy of the marker velocity
+   real(8):: cos_alpha  !< projection of the velocity on the normal
+   real(8):: deltaE
+
+   if (FoilInteractionModel.eq.1) then
+     MC_marker%weight = FoilInteractionParameters(1) * MC_marker%weight
+   elseif (FoilInteractionModel.eq.2) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilInteractionParameters(2) * FoilInteractionParameters(3)/cos_alpha * sqrt(Energy)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+   elseif (FoilInteractionModel.eq.3) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilInteractionParameters(2)/cos_alpha * &
+      (FoilInteractionParameters(3) * sqrt(Energy) + FoilInteractionParameters(4)*Energy)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+   else
+     stop 'Option not Implemented'
+   endif
+ end subroutine foilInteraction
+
 end module sinpa_module

@@ -1,3 +1,13 @@
+** 1.0 CarbonFoil modeling:
+- No needed to create the /bin/ forlder during the first installation
+- Included different models of energy loss and attenuation in the carbon foil (for INPA)
+- If the scintillator is not the last element of the geometry files, the code will internally re-arange it
+- nGeomElements was moved to the ExtraGeometryParams namelist, as it is a characteristic of the chosen geometry
+- Particle impinging from behind the scintillator will no longer be considered
+- ScintNormal not needed in the Extra geometry params namelist, as it will be calculated from the triangles of the scintillator. Notice: The order of the points in the triangles should be right-handed such as the normal goes in the direction of the emmited light
+- Number of geometry element to load is no longer needed to be be included in the configuration namelist, this parameter was moved to the Geometry namelist
+
+
 ** 0.3 Namelist update:
 - Default values are defined for namelist parameters, no need of giving all parameters like inputs
 - GeomID changed to geomFolder: Now we would need to give the program the whole path to the folder with the element files and not just the geomID

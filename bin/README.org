@@ -1,0 +1,3 @@
+In this file the compiled binaries will be stored
+
+Those are the files you need to execute to run the code

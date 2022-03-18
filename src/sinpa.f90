@@ -39,7 +39,7 @@ program sinpa
   call getarg(1, input_filename)
 
   ! Open and read the configuration namelist.
-  open(unit=60, file=input_filename, form='formatted', iostat=ierr)
+  open(unit=60, file=trim(input_filename), form='formatted', iostat=ierr)
   read(60, NML=config, iostat=ierr)
   close(60)
 
@@ -67,13 +67,41 @@ program sinpa
   if (FILDSIMmode.eqv..False.) then
     open (unit=60, file=input_filename, form='formatted', iostat=ierr)
     read(60, NML=nbi_namelist, iostat = ierr)
+    close(60)
     nbi%u = u
+    if (abs(norm2(u) - 1.0d0) .gt. 0.01) then
+      stop 'NBI director vector is not well defined (not unitary)'
+    endif
     nbi%p0 = p0
-    close(60)
-    ! Markers interaction (energy loss and scattering) parameters
-    open (unit=60, file=input_filename, form='formatted', iostat=ierr)
-    read(60, NML=markerinteractions, iostat=ierr)
-    close(60)
+    ! Markers interaction (energy loss, tramisssion and scattering) parameters
+    if (FoilInteractionModel .eq. 1) then
+      allocate(FoilInteractionParameters(1))
+      if (verbose) then
+        print*,'Just Transmission factor and will be applied'
+      endif
+    elseif (FoilInteractionModel .eq. 2) then
+      allocate(FoilInteractionParameters(3))
+      if (verbose) then
+        print*,'Transmission factor and empirical energy loss will be applied'
+      endif
+    elseif (FoilInteractionModel .eq. 3) then
+      allocate(FoilInteractionParameters(4))
+      if (verbose) then
+        print*,'Transmission factor and SRIM energy loss will be applied'
+      endif
+    elseif (FoilInteractionModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for carbon foil - marker interaction'
+      endif
+    else
+      stop 'Interaction model not understood'
+    endif
+    if (FoilInteractionModel .ne. 0) then
+      open (unit=60, file=input_filename, form='formatted', iostat=ierr)
+      read(60, NML=markerinteractions, iostat=ierr)
+      close(60)
+    endif
+
   end if
 
   if (verbose) then
@@ -113,7 +141,7 @@ program sinpa
   if (minAngle .le. 0.0d0) then
     minAngle = minAngle + 2.0d0*pi
   endif
-  call calculate_betas(.True.)  ! This is in beta, not used at the moment
+  call calculate_betas(restrict_mode)
   ! --- Stablish the sign of the dt
   if (backtrace) then
     time_sign = -1.0d0
@@ -231,6 +259,12 @@ program sinpa
                 endif
                 cycle Lmarkers
               elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+                incidentProjection = sum(ScintNormal*part%velocity(:, istep))&
+                  /norm2(part%velocity(:, istep))
+                if (incidentProjection .gt. 0) then
+                  ! neglect marker
+                  cycle Lmarkers
+                endif
                 cScintillator = cScintillator + 1 ! Update counter
                 ! Save the common FILD and INPA variables:
                 ! Store the other information of the marker
@@ -241,12 +275,9 @@ program sinpa
                 Strike(9:11, cScintillator ) = &
                   MATMUL(rotation, part%collision_point - ps) ! f pos scint
                 Strike(12, cScintillator) = &
-                    180/pi*acos(sum(ScintNormal*part%velocity(:, istep))&
-                    /norm2(part%velocity(:, istep))) ! incident angle
+                    180/pi*acos(incidentProjection) ! incident angle
                 ! Save INPA extra varialbes
                 if (FILDSIMmode.eqv..False.) then
-                  ! ToDo: Is the energy loss in the foil is included, change this
-                  ! ratio vv0/v0 to the real velocity
                   call minimumDistanceLines(part%position(:, 1), &
                                             part%velocity(:, 1)/v0, nbi%p0,&
                                             nbi%u, dMin, posMin)
@@ -271,6 +302,7 @@ program sinpa
                 part%dt = dt   ! Good dt to evolve an ion
                 part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
                 part%position(:, istep + 1) = part%collision_point
+                call foilInteraction(part,foilNormal, istep )
                 r0 = part%collision_point
                 cFoil = cFoil + 1 ! Update the counter
               else
@@ -300,7 +332,8 @@ program sinpa
         ! Print some information
         if (verbose) then
           if (FILDSIMmode) then
-            print*, 'Gyroradius:', rL(irl), ' Pitch:', int(180.0*acos(XI(iXI)/IpBt)/pi)
+            ! The +0.001 is just a trick to avoid rounding issues
+            print*, 'Gyroradius:', rL(irl), ' Pitch:', int(180.0*acos(XI(iXI)/IpBt)/pi+0.001)
           else
             print*, 'Gyroradius:', rL(irl), ' Alpha:', XI(iXI)
             print*, 'Hitting Foil', cFoil
