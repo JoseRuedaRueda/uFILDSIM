@@ -194,7 +194,7 @@ program sinpa
     call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
     dt = 2 * pi / OmegaPart / nGyro * time_sign
-    part%n_t = int(maxT/dt)
+    part%n_t = abs(int(maxT/dt))
     if (verbose) then
       print*, part%n_t, 'steps will be performed for each particle'
     endif
