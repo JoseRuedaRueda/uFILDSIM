@@ -1,3 +1,7 @@
+** 1.1 Scintillator modelling:
+- Models to include the yield in the scintillator added to the code
+- FIDASIM weight now is scaled by the pinhole area so is stored in part/s
+- Initial and final energy stored in the signal strike points file
 ** 1.0 CarbonFoil modeling:
 - No needed to create the /bin/ forlder during the first installation
 - Included different models of energy loss and attenuation in the carbon foil (for INPA)
@@ -6,7 +10,7 @@
 - Particle impinging from behind the scintillator will no longer be considered
 - ScintNormal not needed in the Extra geometry params namelist, as it will be calculated from the triangles of the scintillator. Notice: The order of the points in the triangles should be right-handed such as the normal goes in the direction of the emmited light
 - Number of geometry element to load is no longer needed to be be included in the configuration namelist, this parameter was moved to the Geometry namelist
-- *bug*: maxT needed to be negative is backtracing mode was activated. 
+- *bug*: maxT needed to be negative is backtracing mode was activated.
 
 ** 0.3 Namelist update:
 - Default values are defined for namelist parameters, no need of giving all parameters like inputs

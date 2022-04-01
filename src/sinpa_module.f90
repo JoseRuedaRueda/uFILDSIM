@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 0  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 1  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -52,6 +52,7 @@ module sinpa_module
       integer :: n_t    !< Number of integration steps
       real (8), dimension(:,:), allocatable:: position !< Particle position in cm
       real (8), dimension(:,:), allocatable:: velocity !< Particle velocity in cm/s
+      real (8):: energy0 !< particle energy at the entrance (keV)
       real (8):: weight  !< Weight of the markers, [part/s/cm^2 of pinhole, for FIDASIM, in au, for mapping]
       real (8):: type    !< Marker type: identify if is active or passive, follows FIDASIM criteria
       logical :: collision = .FALSE. !< Flag for the collision
@@ -208,6 +209,7 @@ module sinpa_module
   integer:: cOrb = 0!< Number of saved orbits
   ! --- Signal
   type(FIDASIM):: F4Markers !< FIDASIM4 markers
+  real(8):: normalization_resample
 
   ! --- Others
   integer:: ierr !< error management
@@ -266,14 +268,16 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
-  integer:: FoilInteractionModel = 0
+  integer:: FoilElossModel = 0
+  integer:: ScintillatorYieldModel = 0
+  integer:: FoilYieldModel = 0
 
   ! Namelist
   NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nxi, &
     nGyroradius, nMap, n1, r1, mapping, &
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
-    backtrace,restrict_mode, FoilInteractionModel
+    backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -294,9 +298,11 @@ module sinpa_module
   real(8), dimension(3) :: u2  !< second tangent in the pinhole
 
   ! --- Particle and foil parameters
-  real(8), dimension(:), allocatable:: FoilInteractionParameters  !< Foil parameters
+  real(8), dimension(:), allocatable:: FoilElossParameters  !< Foil parameters
+  real(8), dimension(:), allocatable:: ScintillatorYieldParameters  !< Scintillator parameters
+  real(8), dimension(:), allocatable:: FoilYieldParameters  !< Scintillator parameters
   ! Namelist
-  NAMELIST /markerinteractions/ FoilInteractionParameters
+  NAMELIST /markerinteractions/ FoilElossParameters, ScintillatorYieldParameters, FoilYieldParameters
 
   ! --- NBI namelist
   ! Dummy variables for namelist
@@ -1480,7 +1486,7 @@ contains
         foilNormal = foilNormal / sqrt(sum(foilNormal**2))
       elseif (geometry(i)%kind .eq. 2) then
         call vec_product(geometry(i)%triangles(1, 1, :),  geometry(i)%triangles(1, 2, :), ScintNormal)
-        ScintNormal = ScintNormal / sqrt(sum(foilNormal**2))
+        ScintNormal = ScintNormal / sqrt(sum(ScintNormal**2))
       endif
     enddo
     ! Ensure the scintillator to be the last element
@@ -1545,7 +1551,6 @@ contains
     read(60) F4Markers%time
     read(60) F4Markers%nr_npa
     read(60) F4Markers%counter
-
     ! Read the initial position
     allocate(dummy2D(F4Markers%counter, 3))
     allocate(F4Markers%ipos(3, F4Markers%counter))
@@ -1561,11 +1566,11 @@ contains
     read(60) dummy2D
     F4Markers%v = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy1D
-    F4Markers%wght = dble(dummy1D)
+    F4Markers%wght = dble(dummy1D) * pinhole%d1**2 * pi
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
     if (verbose) then
-      print*, F4Markers%counter, '*', nResampling, 'markers to be follwed'
+      print*, F4Markers%counter, '*', nResampling, 'markers to be followed'
     endif
   end subroutine readFIDASIM4Markers
 
@@ -1739,9 +1744,9 @@ contains
    endif
  end subroutine saveOrbit
 
- !------------------------------------------------------------------------------
+ !-----------------------------------------------------------------------------
  ! SECTION 10: Foil interaction
- !------------------------------------------------------------------------------
+ !-----------------------------------------------------------------------------
  subroutine foilInteraction(MC_marker, normal, step)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1763,38 +1768,75 @@ contains
    real(8):: Energy !< Energy of the particle, in keV
    real(8), dimension(3):: localV  !< Dummy copy of the marker velocity
    real(8):: cos_alpha  !< projection of the velocity on the normal
-   real(8):: deltaE
+   real(8):: deltaE, yield
 
-   if (FoilInteractionModel.eq.1) then
-     MC_marker%weight = FoilInteractionParameters(1) * MC_marker%weight
-   elseif (FoilInteractionModel.eq.2) then
-     ! Scale the velocity
-     localV = MC_marker%velocity(:, step+1)
-     modV = sqrt(sum(localV**2))
-     localV = localV/modV
-     ! Get the incident angle (projection)
-     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
-     ! Scale the energy
-     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
-     deltaE = - FoilInteractionParameters(2) * FoilInteractionParameters(3)/cos_alpha * sqrt(Energy)
-     ! Scale the velocity
-     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
-   elseif (FoilInteractionModel.eq.3) then
-     ! Scale the velocity
-     localV = MC_marker%velocity(:, step+1)
-     modV = sqrt(sum(localV**2))
-     localV = localV/modV
-     ! Get the incident angle (projection)
-     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
-     ! Scale the energy
-     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
-     deltaE = - FoilInteractionParameters(2)/cos_alpha * &
-      (FoilInteractionParameters(3) * sqrt(Energy) + FoilInteractionParameters(4)*Energy)
-     ! Scale the velocity
-     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
-   else
-     stop 'Option not Implemented'
+   if (FoilYieldModel.eq.1) then
+     MC_marker%weight = MC_marker%weight * FoilYieldParameters(1)
+   elseif (FoilYieldModel.eq.2) then
+     ! estimate the ionization efficiency
+     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) *MC_marker%energy0 / M)
+     ! Scale the weight
+     MC_marker%weight = MC_marker%weight * FoilYieldParameters(1) * yield
    endif
+
+   if (FoilElossModel.eq.1) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     deltaE = - FoilElossParameters(1) * FoilElossParameters(2)/cos_alpha * sqrt(MC_marker%energy0)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (MC_marker%energy0 + deltaE)/(M/qe*amu_to_kg/1000.0))
+   elseif (FoilElossModel.eq.2) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilElossParameters(1)/cos_alpha * &
+      (FoilElossParameters(2) * sqrt(Energy) + FoilElossParameters(3)*Energy)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+   endif
+
  end subroutine foilInteraction
 
+ !-----------------------------------------------------------------------------
+ ! SECTION 11: Yield modelling
+ !-----------------------------------------------------------------------------
+ subroutine yieldScintillator(MC_marker, step)
+   ! -----------------------------------------------------------------------
+   ! Save the orbit
+   !> \brief Apply the interaction to the marker
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - MC_marker: markers to be modified
+   !  - step: step where the collision have taken place
+   ! -----------------------------------------------------------------------
+   ! Dummy variables
+   type(marker), intent(inout):: MC_marker
+   integer, intent(in):: step
+   ! Local variables
+   real(8):: modV  !< velocity modulus
+   real(8):: Energy !< Energy of the particle, in keV
+   real(8), dimension(3):: localV  !< Dummy copy of the marker velocity
+   real(8):: deltaE
+  if (ScintillatorYieldModel.eq.1) then
+     MC_marker%weight = MC_marker%weight * ScintillatorYieldParameters(1)
+  else if (ScintillatorYieldModel.eq.2) then
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Scale the weight
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     MC_marker%weight =ScintillatorYieldParameters(1) * (Energy ** ScintillatorYieldParameters(2)) * MC_marker%weight
+   endif
+ end subroutine yieldScintillator
 end module sinpa_module
