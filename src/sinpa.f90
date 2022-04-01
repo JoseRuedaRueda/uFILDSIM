@@ -13,7 +13,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 21/01/2022
-!> \version 0.2
+!> \version 1.1
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -74,29 +74,58 @@ program sinpa
     endif
     nbi%p0 = p0
     ! Markers interaction (energy loss, tramisssion and scattering) parameters
-    if (FoilInteractionModel .eq. 1) then
-      allocate(FoilInteractionParameters(1))
+    if (FoilElossModel .eq. 1) then
+      allocate(FoilElossParameters(2))
       if (verbose) then
-        print*,'Just Transmission factor and will be applied'
+        print*,'Empirical energy loss will be applied'
       endif
-    elseif (FoilInteractionModel .eq. 2) then
-      allocate(FoilInteractionParameters(3))
+    elseif (FoilElossModel .eq. 2) then
+      allocate(FoilElossParameters(3))
       if (verbose) then
-        print*,'Transmission factor and empirical energy loss will be applied'
+        print*,'SRIM energy loss will be applied'
       endif
-    elseif (FoilInteractionModel .eq. 3) then
-      allocate(FoilInteractionParameters(4))
+    elseif (FoilElossModel .eq. 0) then
       if (verbose) then
-        print*,'Transmission factor and SRIM energy loss will be applied'
-      endif
-    elseif (FoilInteractionModel .eq. 0) then
-      if (verbose) then
-        print*,'No model will be applied for carbon foil - marker interaction'
+        print*,'No model will be applied for carbon foil energy loss'
       endif
     else
       stop 'Interaction model not understood'
     endif
-    if (FoilInteractionModel .ne. 0) then
+    if (ScintillatorYieldModel .eq. 1) then
+      allocate(ScintillatorYieldParameters(1))
+      if (verbose) then
+        print*,'Just proportionality factor will be applied'
+      endif
+    elseif (ScintillatorYieldModel .eq. 2) then
+      allocate(ScintillatorYieldParameters(2))
+      if (verbose) then
+        print*,'Birk model will be assumed'
+      endif
+    elseif (ScintillatorYieldModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for scintillator efficiency'
+      endif
+    else
+      stop 'Yield model not understood'
+    endif
+    if (FoilYieldModel .eq. 1) then
+      allocate(FoilYieldParameters(1))
+      if (verbose) then
+        print*,'Just proportionality factor will be applied for foil transmission'
+      endif
+    elseif (FoilYieldModel .eq. 2) then
+      allocate(FoilYieldParameters(4))
+      if (verbose) then
+        print*,'Empirical ionization yield applied'
+      endif
+    elseif (FoilYieldModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for foil yield'
+      endif
+    else
+      stop 'Yield model not understood'
+    endif
+    if ((FoilElossModel .ne. 0) .or. (FoilYieldModel .ne. 0) .or. (ScintillatorYieldModel .ne. 0))then
       open (unit=60, file=input_filename, form='formatted', iostat=ierr)
       read(60, NML=markerinteractions, iostat=ierr)
       close(60)
@@ -259,6 +288,7 @@ program sinpa
                 endif
                 cycle Lmarkers
               elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+                call yieldScintillator(part, istep)
                 incidentProjection = sum(ScintNormal*part%velocity(:, istep))&
                   /norm2(part%velocity(:, istep))
                 if (incidentProjection .gt. 0) then
@@ -424,7 +454,7 @@ program sinpa
   signal_part: if (signal) then
     if (verbose) then
       print*, '-----------------------------------------------------------------'
-      print*,'Performing mapping'
+      print*,'Calculating signal'
     endif
     ! Fist load the markers simulation
     if (FILDSIMmode) then
@@ -437,7 +467,7 @@ program sinpa
     open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 15
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 17
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
@@ -457,7 +487,7 @@ program sinpa
     call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
     dt = 2 * pi / OmegaPart / nGyro
-    part%n_t = int(maxT/dt)
+    part%n_t = int(abs(maxT/dt))
     dt1 = 4.0E-7
     if (verbose) then
       print*, part%n_t, 'steps will be performed for each particle'
@@ -465,7 +495,7 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(15,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(Strike(17,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     ! -- Initialise all the counters
     cScintillator = 0
@@ -473,7 +503,12 @@ program sinpa
     cWrongIons = 0
     cWrongNeutral = 0
     cFoil = 0
+    ! --- Get the scale
+    ! See the normalization factor for the weight
+    normalization_resample = max(dble(nResampling), 1.0d0)
     markers: do i=1, F4Markers%counter
+      ! - Common data for all resampled markers
+      part%energy0 = 0.5*sum(F4Markers%v(:, i)**2)*M/qe*amu_to_kg/1000.0
       resample: do j=1, nResampling
         ! Initialise the markers
         ! - Clean the marker data
@@ -481,16 +516,17 @@ program sinpa
         part%velocity(:, :) = 0.0d0
         part%collision     = .False.
         part%kindOfCollision = 9  ! Just initialise it to a dummy value
+        part%weight = F4Markers%wght(i) / normalization_resample
+
         ! - FIDASIM data
-        part%weight        = F4Markers%wght(i) / nResampling
-        part%velocity(:,1) = F4Markers%v(:, i)
+        part%velocity(:, 1) = F4Markers%v(:, i)
         ! Resample the position (only valid for circular pinholes)
         pos1 = pinhole%r + pinhole%d1*(20.0d0*pinhole%u1 + 20.0d0*pinhole%u2)
         do while (sqrt(sum((pos1-pinhole%r)**2)) .gt.  pinhole%d1)
           call random_number(ran)
           pos1 = pinhole%r+ pinhole%d1*((-1+2*ran(2))*pinhole%u1+(-1+2*ran(3))*pinhole%u2)
         end do
-        part%position(:,1) = pos1
+        part%position(:, 1) = pos1
 
         ! - dt and charge
         part%dt    = dt1
@@ -521,6 +557,7 @@ program sinpa
               cycle resample
 
             elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+              call yieldScintillator(part, istep)
               cScintillator = cScintillator + 1 ! Update counter
               Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
               Strike(2:4, cScintillator ) = part%collision_point ! f point
@@ -530,6 +567,8 @@ program sinpa
               Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
               Strike(14,cScintillator) = part%weight ! weight
               Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
+              Strike(16, cScintillator) = part%energy0 ! energy at entrance
+              Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
               if (saveOrbits) then
                 call random_number(rand_number)
                 if (rand_number .lt. saveRatio) then
@@ -545,6 +584,7 @@ program sinpa
               part%dt = dt   ! Good dt to evolve an ion
               part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
               part%position(:, istep + 1) = part%collision_point
+              call foilInteraction(part,foilNormal, istep )
               cFoil = cFoil + 1 ! Update the counter
             else
               print*, 'Warning we collide with element of kind', part%kindOfCollision
