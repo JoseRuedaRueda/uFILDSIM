@@ -7,7 +7,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 26/07/2021
-!> \version 0.0
+!> \version 1.2
 !> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
 !
 ! DESCRIPTION:
@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 1  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -171,6 +171,7 @@ module sinpa_module
   real(8), dimension(:, :), allocatable:: Strike !< Matrix to store data
   real(8), dimension(:, :), allocatable:: StrikeMap !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: CollimatorStrikes !< Matrix to store the strike map
+  real(8), dimension(:, :), allocatable:: WrongMarkers !< Matrix to store the strike map
   real(8), dimension(3,3):: rotation !< Rotation matrix
   real(8), dimension(3):: ps !< reference point in the scintillator
   real(8), dimension(3):: ScintNormal !< Normal to the scintillator
@@ -204,6 +205,7 @@ module sinpa_module
   integer:: cCollimator !< Number of markers impinging the collimator
   integer:: cWrongNeutral !< Number of markers not colliding with the collimator neither carbon foil
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
+  integer:: cWrong !< Number of ions not colliding with anything
   integer:: cScintillator !< Number of markers colliding with the scintillator, for each alpha
   integer:: cFoil !< Number of markers colliding with the foil, for each alpha
   integer:: cOrb = 0!< Number of saved orbits
@@ -266,6 +268,7 @@ module sinpa_module
   integer:: IpBt = -1!< Sign of the magnetic field vs the current
   logical:: flag_efield_on = .false.!< include or not electric field
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
+  logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
   integer:: FoilElossModel = 0
@@ -277,7 +280,8 @@ module sinpa_module
     nGyroradius, nMap, n1, r1, mapping, &
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
-    backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel
+    backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
+    save_wrong_markers_position
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -727,57 +731,58 @@ contains
     idx(4) = ja1
   end subroutine interpolate2D_coefficients
 
-  subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
-    ! -----------------------------------------------------------------------
-    ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
-    !> \brief Computes, for a three given type(base), the nearest neighbours and the
-    !! normalized distance to all of them (normalized to the interval size in each direction).
-    !> \detail These values are used for interpolation in 3D.
-    ! -----------------------------------------------------------------------
-    implicit none
+  ! -----------------------------------------------------------------------
+! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
+!> \brief Computes, for a three given type(base), the nearest neighbours and the
+!! normalized distance to all of them (normalized to the interval size in each direction).
+!> \detail These values are used for interpolation in 3D.
+! -----------------------------------------------------------------------
+subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
+  implicit none
 
-    class(grid_class), intent(in)::x1 !< Grid class for each direction.
-    class(grid_class), intent(in)::x2
-    class(grid_class), intent(in)::x3
-    real(8), intent(in)::x1q, x2q, x3q !< Query points in each direction.
-    real(8), intent(out)::aaa(8) !< Contains the interpolating coefficients.
-    integer, intent(out)::idx(6)  !< Nearest points in the grid
-                                  !! (N, N+1)->closer to the left and right respectively.
-    integer::ia, ia1, ja, ja1, ka, ka1
-    real(8)::ar, az, aphi, ar1, az1, aphi1
+  class(grid_class), intent(in)::x1 !< Grid class for each direction.
+  class(grid_class), intent(in)::x2
+  class(grid_class), intent(in)::x3
+  real(8), intent(in)::x1q, x2q, x3q !< Query points in each direction.
+  real(8), intent(out)::aaa(8) !< Contains the interpolating coefficients.
+  integer, intent(out)::idx(6)  !< Nearest points in the grid
+                                !! (N, N+1)->closer to the left and right respectively.
+  integer::ia, ia1, ja, ja1, ka, ka1
+  real(8)::ar, az, aphi, ar1, az1, aphi1
 
-    ia  = max(1, min(x1%size-1, int((x1q - x1%x0)/x1%dx  + 1)))
-    ia1 = ia + 1
-    ja  = max(1, min(x2%size-1, int((x2q - x2%x0)/x2%dx  + 1)))
-    ja1 = ja + 1
-    ka  = max(1, min(x3%size-1, int((x3q - x3%x0)/x3%dx  + 1)))
-    ka1 = ka + 1
+  ia  = max(1, min(x1%size-1, int((x1q - x1%x0)/x1%dx  + 1)))
+  ia1 = ia + 1
+  ja  = max(1, min(x2%size-1, int((x2q - x2%x0)/x2%dx  + 1)))
+  ja1 = ja + 1
+  ka  = max(1, min(x3%size-1, int((x3q - x3%x0)/x3%dx  + 1)))
+  ka1 = ka + 1
 
-    ar1   = max(0.0d0, min(1.0d0, (x1q-x1%data(ia))/x1%dx))
-    ar    = 1.0d0 - ar1
-    az1   = max(0.0d0, min(1.0d0, (x2q-x2%data(ka))/x2%dx))
-    az    = 1.0d0 - az1
-    aphi1 = max(0.0d0, min(1.0d0, (x3q-x3%data(ja))/x3%dx))
-    aphi  = 1.0d0 - aphi1
+  ar1   = max(0.0d0, min(1.0d0, (x1q-x1%data(ia))/x1%dx))
+  ar    = 1.0d0 - ar1
+  az1   = max(0.0d0, min(1.0d0, (x2q-x2%data(ka))/x2%dx))
+  az    = 1.0d0 - az1
+  aphi1 = max(0.0d0, min(1.0d0, (x3q-x3%data(ja))/x3%dx))
+  aphi  = 1.0d0 - aphi1
 
-    ! Interpolating coefficients.
-    aaa(1) = ar *az *aphi
-    aaa(2) = ar1*az *aphi
-    aaa(3) = ar *az1*aphi
-    aaa(4) = ar1*az1*aphi
-    aaa(5) = ar *az *aphi1
-    aaa(6) = ar1*az *aphi1
-    aaa(7) = ar *az1*aphi1
-    aaa(8) = ar1*az1*aphi1
+  ! Interpolating coefficients.
+  aaa(1) = ar  * aphi  * az
+  aaa(2) = ar1 * aphi  * az
+  aaa(3) = ar  * aphi1 * az
+  aaa(4) = ar1 * aphi1 * az
+  aaa(5) = ar  * aphi  * az1
+  aaa(6) = ar1 * aphi  * az1
+  aaa(7) = ar  * aphi1 * az1
+  aaa(8) = ar1 * aphi1 * az1
 
-    ! Interpolation indexes.
-    idx(1) = ia
-    idx(2) = ia1
-    idx(3) = ja
-    idx(4) = ja1
-    idx(5) = ka
-    idx(6) = ka1
-  end subroutine interpolate3D_coefficients
+  ! Interpolation indexes.
+  idx(1) = ia
+  idx(2) = ia1
+  idx(3) = ja
+  idx(4) = ja1
+  idx(5) = ka
+  idx(6) = ka1
+end subroutine interpolate3D_coefficients
+
 
 !------------------------------------------------------------------------------
 ! SECTION 4: MAGNETIC FIELD
