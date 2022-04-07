@@ -26,6 +26,7 @@ program sinpa
   !       - 61: File with the strike points for the mapping (signal)
   !       - 62: Colimator data
   !       - 63: Orbit file
+  !       - 64: Wrong markers file
   !****************************************************************************
   use sinpa_module
   implicit none
@@ -206,7 +207,7 @@ program sinpa
     if (save_collimator_strike_points) then
       open(unit=62, file=trim(runFolder)//&
            '/results/'//trim(runID)//'.spcmap', access = 'stream', action='write', status='replace')
-      write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, 4
+      write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), 4
     endif
     ! -- File to save the orbits
     if (saveOrbits) then
@@ -218,6 +219,12 @@ program sinpa
       else
         write(63) 6
       endif
+    endif
+    ! --  File to save the wrong markers
+    if (save_wrong_markers_position) then
+      open(unit=64, file=trim(runFolder)//&
+           '/results/'//trim(runID)//'.wmmap', access = 'stream', action='write', status='replace')
+      write(64) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), 4
     endif
     ! --- Allocate the particle:
     call cpu_time(t_initial_orbits)
@@ -244,6 +251,7 @@ program sinpa
         cScintillator = 0
         cCollimator = 0
         cFoil = 0
+        cWrong = 0
         ! -- Clean the matrices with the complete information
 
         nToLaunch = int(dble(nMap) * marker_factor(iXI) * (1.0d0 + n1/(rL(irl)-r1)**2))
@@ -257,8 +265,10 @@ program sinpa
           allocate(Strike(19,nToLaunch+1))            ! Strike points in the scint
         endif
         allocate(CollimatorStrikes(4,nToLaunch+1))       ! Strike position on the coll
+        allocate(WrongMarkers(4,nToLaunch+1))       ! Strike position on the coll
         CollimatorStrikes(:,:) = 0.0d0
         Strike(:,:) = 0.0d0
+        WrongMarkers(:,:) = 0.0d0
         Lmarkers: do  imc = 1, nToLaunch
           call initMarker(v0, dt1, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
 
@@ -350,6 +360,10 @@ program sinpa
               call saveOrbit(63, part, part%n_t, saveOrbitLongMode)
             endif
           endif
+          ! Save the final point of the marker
+          cWrong = cWrong + 1
+          WrongMarkers(1:3, cWrong) = part%position(:, istep)
+          WrongMarkers(4, cWrong) = part%weight
         enddo Lmarkers
         ! ! Rotate the data
         ! Strike(16:18, 1:cScintillator ) = &
@@ -358,6 +372,9 @@ program sinpa
         write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
         if (save_collimator_strike_points) then
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+        endif
+        if (save_wrong_markers_position) then
+          write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
         endif
         ! Print some information
         if (verbose) then
@@ -402,6 +419,7 @@ program sinpa
         ! De-allocate the variables
         deallocate(Strike)
         deallocate(CollimatorStrikes)
+        deallocate(WrongMarkers)
       enddo LXI
     enddo Lenergies
     call cpu_time(t_final_orbits)
@@ -416,15 +434,15 @@ program sinpa
     write(60,'(i2, i2, a)') versionID1, versionID2, ' # SINPA version'
     if (FILDSIMmode) then
       write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a)') 'Gyroradius (cm)', &
-        'Pitch-Angle (degree)', 'X (cm)', 'Y (cm)', 'Z (cm)',&
+        'Pitch-Angle (degree)', 'X (m)', 'Y (m)', 'Z (m)',&
         'Average_initial_gyrophase','N_strike_points', 'Collimator_Factor (percent)', 'Average_incidence_angle'
       ! Revert the pitch to the criteria useed in old fildsim
       StrikeMap(2, :) = 180.0d0/pi*acos(StrikeMap(2, :)/dble(IpBt))
       write(60,'(9F14.6)') StrikeMap
     else
-      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a)') 'Gyroradius (cm)', &
-              'Alpha [rad]', 'X [cm]', 'Y [cm]', 'Z [cm]', &
-              'X0 [cm]','Y0[cm]', 'Z0[cm]','d0[cm]','Collimator_Factor (%)', 'nMarkers'
+      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a)') 'Gyroradius [cm]', &
+              'Alpha [rad]', 'X [m]', 'Y [m]', 'Z [m]', &
+              'X0 [m]','Y0[m]', 'Z0[m]','d0[m]','Collimator_Factor (%)', 'nMarkers'
       ! Write the data
       write(60,'(13F14.6)') StrikeMap
     endif
@@ -438,6 +456,9 @@ program sinpa
       write(63) m
       write(63) cOrb  ! Write how many orbits we wrote in the file
       close(63)
+    endif
+    if (save_wrong_markers_position) then
+      close(64)
     endif
 
     !De-allocate
@@ -471,7 +492,7 @@ program sinpa
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
-    write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0,4
+    write(62) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 4
     ! -- File to save the orbits
     if (saveOrbits) then
       open(unit=63, file=trim(runFolder)//&
@@ -482,6 +503,12 @@ program sinpa
       else
         write(63) 6
       endif
+    endif
+    ! --  File to save the wrong markers
+    if (save_wrong_markers_position) then
+      open(unit=64, file=trim(runFolder)//&
+           '/results/'//trim(runID)//'.wmsig', access = 'stream', action='write', status='replace')
+      write(64) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 4
     endif
     ! --- Allocate the particle:
     call cpu_time(t_initial_orbits)
@@ -497,11 +524,16 @@ program sinpa
     ! --- Allocate the necesary matrix
     allocate(Strike(17,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
+    allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
+    CollimatorStrikes(:,:) = 0.0d0
+    Strike(:,:) = 0.0d0
+    WrongMarkers(:,:) = 0.0d0
     ! -- Initialise all the counters
     cScintillator = 0
     cCollimator = 0
     cWrongIons = 0
     cWrongNeutral = 0
+    cWrong = 0
     cFoil = 0
     ! --- Get the scale
     ! See the normalization factor for the weight
@@ -591,11 +623,28 @@ program sinpa
             endif
           endif
         enddo signal_tracking
+        ! if we achieve this point, the particle has not collide, save the
+        ! orbit for future analysis
+        if (saveOrbits) then
+          call random_number(rand_number)
+          if (rand_number .lt. saveRatio) then
+            ! Save the collision point in the trajectory for future use
+            cOrb = cOrb + 1
+            call saveOrbit(63, part, part%n_t, saveOrbitLongMode)
+          endif
+        endif
+        ! Save the final point of the marker
+        cWrong = cWrong + 1
+        WrongMarkers(1:3, cWrong) = part%position(:, istep)
+        WrongMarkers(4, cWrong) = part%weight
       enddo resample
     end do markers
     write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
     if (save_collimator_strike_points) then
       write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+    endif
+    if (save_wrong_markers_position) then
+      write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
     endif
     if (verbose) then
       print*, '-----'
@@ -608,6 +657,14 @@ program sinpa
     close(61)
     if (save_collimator_strike_points) then
       close(62)
+    endif
+    if (saveOrbits) then
+      write(63) m
+      write(63) cOrb  ! Write how many orbits we wrote in the file
+      close(63)
+    endif
+    if (save_wrong_markers_position) then
+      close(64)
     endif
     deallocate(part%position)
     deallocate(part%velocity)

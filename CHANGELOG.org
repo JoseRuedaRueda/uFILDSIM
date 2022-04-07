@@ -1,3 +1,6 @@
+** 1.2 Bug solve:
+- Solved a bug by which collimator strikes points could not be loaded in the Scintillator Suite
+- Solved a bug in the 3D interpolation
 ** 1.1 Scintillator modelling:
 - Models to include the yield in the scintillator added to the code
 - FIDASIM weight now is scaled by the pinhole area so is stored in part/s

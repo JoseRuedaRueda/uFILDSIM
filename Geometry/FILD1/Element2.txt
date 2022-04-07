@@ -3,8 +3,8 @@ FILD Collimator. Measured in 2021 by JRR and JGD
 File generated in 1/2022, as example for the SINPA code
 2  ! Kind of plate
 5  ! Number of triangles
-0.03475 -0.0017 -0.04194
 0.03475 -0.0017 -0.00894
+0.03475 -0.0017 -0.04194
 0.03475 0.0389 -0.04194
 0.03475 -0.0017 -0.00894
 0.03475 0.0417 -0.00894

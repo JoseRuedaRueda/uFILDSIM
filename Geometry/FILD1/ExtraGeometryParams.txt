@@ -6,7 +6,8 @@
   pinholeKind = 1     ! 0 = Circular, 1 = rectangle
   d1 = 0.00059  ! Pinhole radius, or size along u1 (in m)
   d2 = 0.00269   ! Size along u2, not used if we have a circular pinhole
-
+  !- Number of Geometry files to load
+  nGeomElements = 2
   ! Unitary vectors:
   u1(1) =  1.0
   u1(2) =  0.0
@@ -24,10 +25,6 @@
   ps(1) = 0.04
   ps(2) = 0.0
   ps(3) = 0.0
-
-  ScintNormal(1) = 1.0 ! Normal to the scintillator
-  ScintNormal(2) = 0.0 
-  ScintNormal(3) = 0.0
 
   rotation(1,1) = 1.0
   rotation(1,2) = 0.0
