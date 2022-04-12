@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -269,6 +269,7 @@ module sinpa_module
   logical:: flag_efield_on = .false.!< include or not electric field
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
+  logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
   integer:: FoilElossModel = 0
@@ -276,12 +277,12 @@ module sinpa_module
   integer:: FoilYieldModel = 0
 
   ! Namelist
-  NAMELIST /config/ runID, GeomFolder, FILDSIMmode, nxi, &
-    nGyroradius, nMap, n1, r1, mapping, &
+  NAMELIST /config/ runID, GeomFolder, nxi, &
+    nGyroradius, nMap, n1, r1, mapping, FILDSIMmode, &
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
-    save_wrong_markers_position
+    save_wrong_markers_position, save_scintillator_strike_points
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
