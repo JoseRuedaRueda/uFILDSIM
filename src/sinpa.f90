@@ -199,10 +199,12 @@ program sinpa
 
     ! --- Open the files to save the data
     ! -- Strike points on the scintillator
-    open(unit=61, file=trim(runFolder)//&
-         '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
-    ! Save the header of the file
-    write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape
+    if (save_scintillator_strike_points) then
+      open(unit=61, file=trim(runFolder)//&
+           '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
+      ! Save the header of the file
+      write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape
+    endif
     ! -- Strike points on the collimator
     if (save_collimator_strike_points) then
       open(unit=62, file=trim(runFolder)//&
@@ -369,7 +371,9 @@ program sinpa
         ! Strike(16:18, 1:cScintillator ) = &
         !   MATMUL(rotation, transpose(Strike(1:3, 1:cScintillator)) -ps)
         ! Write the markers in the file
-        write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
+        if (save_scintillator_strike_points) then
+          write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
+        endif
         if (save_collimator_strike_points) then
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
         endif
@@ -448,7 +452,9 @@ program sinpa
     endif
     ! Close all the openend files
     close(60)
-    close(61)
+    if (save_scintillator_strike_points) then
+      close(61)
+    endif
     if (save_collimator_strike_points) then
       close(62)
     endif
