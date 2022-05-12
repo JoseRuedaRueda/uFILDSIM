@@ -12,8 +12,8 @@
 ! MODULE        : Main Core
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 21/01/2022
-!> \version 1.1
+!> \date 21/04/2022
+!> \version 1.4
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -494,7 +494,7 @@ program sinpa
     open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 17
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 18
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
@@ -528,7 +528,7 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(17,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(Strike(18,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     CollimatorStrikes(:,:) = 0.0d0
@@ -555,6 +555,7 @@ program sinpa
         part%collision     = .False.
         part%kindOfCollision = 9  ! Just initialise it to a dummy value
         part%weight = F4Markers%wght(i) / normalization_resample
+        part%cosalpha_foil = 0.0d0
 
         ! - FIDASIM data
         part%velocity(:, 1) = F4Markers%v(:, i)
@@ -607,6 +608,7 @@ program sinpa
               Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
               Strike(16, cScintillator) = part%energy0 ! energy at entrance
               Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
+              Strike(18, cScintillator) = part%cosalpha_foil
               if (saveOrbits) then
                 call random_number(rand_number)
                 if (rand_number .lt. saveRatio) then
@@ -660,6 +662,9 @@ program sinpa
       print*, 'Not colliding Ions', cWrongIons
       print*, 'hitting foil', cFoil
     endif
+    ! Write time and close the file
+    write(61) F4Markers%time
+    write(61) F4Markers%shot_number
     close(61)
     if (save_collimator_strike_points) then
       close(62)

@@ -1,3 +1,7 @@
+** 1.5 3D bug fix?
+- The 3D interpolation problem may have been solved
+** 1.4 Minor upgrade:
+- Time point is saved at the end of the signal file
 ** 1.3 StrikePoints:
 - Added a flag to save the strike points in the scintillator. This allow to ignore that file if we just want the map, which saves time in the database scans
 ** 1.2 Bug solve:
