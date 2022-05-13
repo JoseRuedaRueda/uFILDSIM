@@ -958,12 +958,12 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     ka1 = idx(6)
 
     a000 = aaa(1)
-    a100 = aaa(2)
-    a010 = aaa(3)
+    a010 = aaa(2)
+    a100 = aaa(3)
     a110 = aaa(4)
     a001 = aaa(5)
-    a101 = aaa(6)
-    a011 = aaa(7)
+    a011 = aaa(6)
+    a101 = aaa(7)
     a111 = aaa(8)
 
     b(1) =    Brfield(ia, ja, ka,  1)*a000  + Brfield(ia1, ja, ka,  1)*a100  &
