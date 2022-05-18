@@ -296,7 +296,7 @@ program sinpa
                               part%velocity(:, istep), &
                               part%position(:, istep + 1),&
                               part%velocity(:, istep + 1), part%dt)
-            call checkCollision(part)
+            call checkCollision(part, istep)
             ! If it has collided, do stuff
             if (part%collision) then
               if (part%kindOfCollision .eq. 0) then
@@ -336,15 +336,15 @@ program sinpa
                   ! Initialise the other varaibles
                   backPart%collision    = .False.
                   backPart%kindOfCollision = 9  ! Just initialise it to a dummy value
-                  backPart%dt = - part%dt
-                  backPart%qm    = Zin *qe / M /amu_to_kg
+                  backPart%dt = -part%dt
+                  backPart%qm = Zin *qe / M /amu_to_kg
                   ! Trace if and check collisions with the collimator
                   backtracking: do iiistep = 1, backPart%n_t-1
                     call pushParticle(backPart%qm, backPart%position(:, iiistep), &
                                       backPart%velocity(:, iiistep), &
                                       backPart%position(:, iiistep + 1),&
                                       backPart%velocity(:, iiistep + 1), backPart%dt)
-                    call checkCollision(backPart)
+                    call checkCollision(backPart, iiistep)
                     if (backPart%collision) then
                       if (backPart%kindOfCollision .eq. 0) then
                         ! Collided with the collimator, dead marker
@@ -431,7 +431,7 @@ program sinpa
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
         endif
         if ((save_self_shadowing_collimator_strike_points).and.(self_shadowing)) then
-          write(65) backCollimator, transpose(CollimatorStrikes(:, 1:backCollimator))
+          write(65) backCollimator, transpose(backCollimatorStrikes(:, 1:backCollimator))
         endif
         if (save_wrong_markers_position) then
           write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
@@ -638,7 +638,7 @@ program sinpa
                             part%velocity(:, istep), &
                             part%position(:, istep + 1),&
                             part%velocity(:, istep + 1), part%dt)
-          call checkCollision(part)
+          call checkCollision(part, istep)
           ! If it has collided, do stuff
           if (part%collision) then
             if (part%kindOfCollision .eq. 0) then
