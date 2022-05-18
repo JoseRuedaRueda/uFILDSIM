@@ -165,13 +165,14 @@ module sinpa_module
   type(NBI_class) :: nbi
   real(8), dimension(:, :), allocatable:: closestPoints    !< closer points to NBI
   real(8), dimension(:), allocatable:: dPoints    !< distance to NBI
-  type(marker) :: part
+  type(marker) :: part, backPart
   real(8) :: dt !< dt for the time integration, in s
   real(8) :: dt1
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
   real(8), dimension(:, :), allocatable:: Strike !< Matrix to store data
   real(8), dimension(:, :), allocatable:: StrikeMap !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: CollimatorStrikes !< Matrix to store the strike map
+  real(8), dimension(:, :), allocatable:: backCollimatorStrikes !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: WrongMarkers !< Matrix to store the strike map
   real(8), dimension(3,3):: rotation !< Rotation matrix
   real(8), dimension(3):: ps !< reference point in the scintillator
@@ -204,6 +205,7 @@ module sinpa_module
 
   ! --- Counters
   integer:: cCollimator !< Number of markers impinging the collimator
+  integer:: backCollimator !< Number of markers impinging the collimator
   integer:: cWrongNeutral !< Number of markers not colliding with the collimator neither carbon foil
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
   integer:: cWrong !< Number of ions not colliding with anything
@@ -217,7 +219,7 @@ module sinpa_module
   ! --- Others
   integer:: ierr !< error management
   integer:: nToLaunch !< number of markers to ba launched
-  integer:: irl, iXI, imc, istep, iistep, i, j!< dummy for loops
+  integer:: irl, iXI, imc, istep, iistep, iiistep, i, j!< dummy for loops
   real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
@@ -271,11 +273,13 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
+  logical:: save_self_shadowing_collimator_strike_points = .false. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
   integer:: FoilElossModel = 0
   integer:: ScintillatorYieldModel = 0
   integer:: FoilYieldModel = 0
+  logical:: self_shadowing = .false.
 
   ! Namelist
   NAMELIST /config/ runID, GeomFolder, nxi, &
@@ -283,7 +287,8 @@ module sinpa_module
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
-    save_wrong_markers_position, save_scintillator_strike_points
+    save_wrong_markers_position, save_scintillator_strike_points, self_shadowing, &
+    save_self_shadowing_collimator_strike_points
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle

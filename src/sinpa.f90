@@ -27,6 +27,7 @@ program sinpa
   !       - 62: Colimator data
   !       - 63: Orbit file
   !       - 64: Wrong markers file
+  !       - 65: Strike position of self-shadowed markers
   !****************************************************************************
   use sinpa_module
   implicit none
@@ -211,6 +212,11 @@ program sinpa
            '/results/'//trim(runID)//'.spcmap', access = 'stream', action='write', status='replace')
       write(62) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), 4
     endif
+    if (save_self_shadowing_collimator_strike_points) then
+      open(unit=65, file=trim(runFolder)//&
+           '/results/'//trim(runID)//'.spcself', access = 'stream', action='write', status='replace')
+      write(65) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), 4
+    endif
     ! -- File to save the orbits
     if (saveOrbits) then
       open(unit=63, file=trim(runFolder)//&
@@ -238,6 +244,12 @@ program sinpa
     endif
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
+    if (self_shadowing) then
+      backPart%n_t = nGyro * 3
+      part%dt = dt
+      allocate(backPart%position(3,backPart%n_t))
+      allocate(backPart%velocity(3,backPart%n_t))
+    endif
     Lenergies: do irl = 1, nGyroradius   ! Loop over energies (gyroradii)
       ! Get a dummy velocity modulus
       call rl2v0(rL(irl), M, Zout, BpinholeMod, v0)
@@ -252,6 +264,7 @@ program sinpa
         ! -- Initialise all the counters
         cScintillator = 0
         cCollimator = 0
+        backCollimator = 0
         cFoil = 0
         cWrong = 0
         ! -- Clean the matrices with the complete information
@@ -271,6 +284,10 @@ program sinpa
         CollimatorStrikes(:,:) = 0.0d0
         Strike(:,:) = 0.0d0
         WrongMarkers(:,:) = 0.0d0
+        if (self_shadowing) then
+          allocate(BackCollimatorStrikes(4,nToLaunch+1))       ! Strike position on the coll
+          BackCollimatorStrikes(:,:) = 0
+        endif
         Lmarkers: do  imc = 1, nToLaunch
           call initMarker(v0, dt1, XI(iXI), min_beta(iXI), delta_beta(iXI), rL(irl))
 
@@ -300,13 +317,49 @@ program sinpa
                 endif
                 cycle Lmarkers
               elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
-                call yieldScintillator(part, istep)
                 incidentProjection = sum(ScintNormal*part%velocity(:, istep))&
                   /norm2(part%velocity(:, istep))
                 if (incidentProjection .gt. 0) then
                   ! neglect marker
                   cycle Lmarkers
                 endif
+                ! If we reach this point, we have collided with the
+                ! scintillator, so if there is the self_shadowing, now launch
+                ! the particle backwards
+                if (self_shadowing) then
+                  ! Clean the backtracing particle
+                  backPart%position(:, :) = 0.0d0
+                  backPart%velocity(:, :) = 0.0d0
+                  ! Set the initial position and velocity
+                  backPart%position(:, 1) = part%position(:, 1)
+                  backPart%velocity(:, 1) = part%velocity(:, 1)
+                  ! Initialise the other varaibles
+                  backPart%collision    = .False.
+                  backPart%kindOfCollision = 9  ! Just initialise it to a dummy value
+                  backPart%dt = - part%dt
+                  backPart%qm    = Zin *qe / M /amu_to_kg
+                  ! Trace if and check collisions with the collimator
+                  backtracking: do iiistep = 1, backPart%n_t-1
+                    call pushParticle(backPart%qm, backPart%position(:, iiistep), &
+                                      backPart%velocity(:, iiistep), &
+                                      backPart%position(:, iiistep + 1),&
+                                      backPart%velocity(:, iiistep + 1), backPart%dt)
+                    call checkCollision(backPart)
+                    if (backPart%collision) then
+                      if (backPart%kindOfCollision .eq. 0) then
+                        ! Collided with the collimator, dead marker
+                        backCollimator = backCollimator + 1
+                        backCollimatorStrikes(1:3, backCollimator) = backPart%collision_point
+                        backCollimatorStrikes(4, backCollimator) = backPart%weight
+                        cycle Lmarkers
+                        
+                      endif
+                    end if
+                  end do backtracking
+                endif
+
+
+                call yieldScintillator(part, istep)
                 cScintillator = cScintillator + 1 ! Update counter
                 ! Save the common FILD and INPA variables:
                 ! Store the other information of the marker
@@ -376,6 +429,9 @@ program sinpa
         endif
         if (save_collimator_strike_points) then
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+        endif
+        if ((save_self_shadowing_collimator_strike_points).and.(self_shadowing)) then
+          write(65) backCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
         endif
         if (save_wrong_markers_position) then
           write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
@@ -465,6 +521,9 @@ program sinpa
     endif
     if (save_wrong_markers_position) then
       close(64)
+    endif
+    if (save_self_shadowing_collimator_strike_points) then
+      close(65)
     endif
 
     !De-allocate
