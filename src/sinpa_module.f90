@@ -6,8 +6,8 @@
 ! MODULE        : Auxiliar routines
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 26/07/2021
-!> \version 1.2
+!> \date 21/04/2022
+!> \version 1.5
 !> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
 !
 ! DESCRIPTION:
@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 5  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -65,6 +65,7 @@ module sinpa_module
       ! Integration
       real (8):: dt !< dt for the integration [s]
       integer::kindOfCollision ! With whom has collide
+      real (8):: cosalpha_foil ! cos alpha inpinging in the INPA foil
   end type marker
 
   ! ABSTRACT CLASS FOR THE FIELDS
@@ -164,13 +165,14 @@ module sinpa_module
   type(NBI_class) :: nbi
   real(8), dimension(:, :), allocatable:: closestPoints    !< closer points to NBI
   real(8), dimension(:), allocatable:: dPoints    !< distance to NBI
-  type(marker) :: part
+  type(marker) :: part, backPart
   real(8) :: dt !< dt for the time integration, in s
   real(8) :: dt1
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
   real(8), dimension(:, :), allocatable:: Strike !< Matrix to store data
   real(8), dimension(:, :), allocatable:: StrikeMap !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: CollimatorStrikes !< Matrix to store the strike map
+  real(8), dimension(:, :), allocatable:: backCollimatorStrikes !< Matrix to store the strike map
   real(8), dimension(:, :), allocatable:: WrongMarkers !< Matrix to store the strike map
   real(8), dimension(3,3):: rotation !< Rotation matrix
   real(8), dimension(3):: ps !< reference point in the scintillator
@@ -203,6 +205,7 @@ module sinpa_module
 
   ! --- Counters
   integer:: cCollimator !< Number of markers impinging the collimator
+  integer:: backCollimator !< Number of markers impinging the collimator
   integer:: cWrongNeutral !< Number of markers not colliding with the collimator neither carbon foil
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
   integer:: cWrong !< Number of ions not colliding with anything
@@ -216,7 +219,7 @@ module sinpa_module
   ! --- Others
   integer:: ierr !< error management
   integer:: nToLaunch !< number of markers to ba launched
-  integer:: irl, iXI, imc, istep, iistep, i, j!< dummy for loops
+  integer:: irl, iXI, imc, istep, iistep, iiistep, i, j!< dummy for loops
   real(8), dimension(3) :: rPinCyl  !< position of the pingole (r,p,z)
   real(8), dimension(3) :: Bpinhole  !< B field at pinhole, vector
   real(8) :: BpinholeMod !< B field at pinhole
@@ -270,11 +273,13 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
+  logical:: save_self_shadowing_collimator_strike_points = .false. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
   integer:: FoilElossModel = 0
   integer:: ScintillatorYieldModel = 0
   integer:: FoilYieldModel = 0
+  logical:: self_shadowing = .false.
 
   ! Namelist
   NAMELIST /config/ runID, GeomFolder, nxi, &
@@ -282,7 +287,8 @@ module sinpa_module
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
-    save_wrong_markers_position, save_scintillator_strike_points
+    save_wrong_markers_position, save_scintillator_strike_points, self_shadowing, &
+    save_self_shadowing_collimator_strike_points
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -739,50 +745,50 @@ contains
 !> \detail These values are used for interpolation in 3D.
 ! -----------------------------------------------------------------------
 subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
-  implicit none
+   implicit none
 
-  class(grid_class), intent(in)::x1 !< Grid class for each direction.
-  class(grid_class), intent(in)::x2
-  class(grid_class), intent(in)::x3
-  real(8), intent(in)::x1q, x2q, x3q !< Query points in each direction.
-  real(8), intent(out)::aaa(8) !< Contains the interpolating coefficients.
-  integer, intent(out)::idx(6)  !< Nearest points in the grid
-                                !! (N, N+1)->closer to the left and right respectively.
-  integer::ia, ia1, ja, ja1, ka, ka1
-  real(8)::ar, az, aphi, ar1, az1, aphi1
+   class(grid_class), intent(in)::x1 !< Grid class for each direction.
+   class(grid_class), intent(in)::x2
+   class(grid_class), intent(in)::x3
+   real(8), intent(in)::x1q, x2q, x3q !< Query points in each direction.
+   real(8), intent(out)::aaa(8) !< Contains the interpolating coefficients.
+   integer, intent(out)::idx(6)  !< Nearest points in the grid
+                                 !! (N, N+1)->closer to the left and right respectively.
+   integer::ia, ia1, ja, ja1, ka, ka1
+   real(8)::ax, ay, az, ax1, ay1, az1
 
-  ia  = max(1, min(x1%size-1, int((x1q - x1%x0)/x1%dx  + 1)))
-  ia1 = ia + 1
-  ja  = max(1, min(x2%size-1, int((x2q - x2%x0)/x2%dx  + 1)))
-  ja1 = ja + 1
-  ka  = max(1, min(x3%size-1, int((x3q - x3%x0)/x3%dx  + 1)))
-  ka1 = ka + 1
+   ia  = max(1, min(x1%size-1, int((x1q - x1%x0)/x1%dx  + 1)))
+   ia1 = ia + 1
+   ja  = max(1, min(x2%size-1, int((x2q - x2%x0)/x2%dx  + 1)))
+   ja1 = ja + 1
+   ka  = max(1, min(x3%size-1, int((x3q - x3%x0)/x3%dx  + 1)))
+   ka1 = ka + 1
 
-  ar1   = max(0.0d0, min(1.0d0, (x1q-x1%data(ia))/x1%dx))
-  ar    = 1.0d0 - ar1
-  az1   = max(0.0d0, min(1.0d0, (x2q-x2%data(ka))/x2%dx))
-  az    = 1.0d0 - az1
-  aphi1 = max(0.0d0, min(1.0d0, (x3q-x3%data(ja))/x3%dx))
-  aphi  = 1.0d0 - aphi1
+   ax1   = max(0.0d0, min(1.0d0, (x1q-x1%data(ia))/x1%dx))
+   ax    = 1.0d0 - ax1
+   ay1   = max(0.0d0, min(1.0d0, (x2q-x2%data(ja))/x2%dx))
+   ay    = 1.0d0 - ay1
+   az1   = max(0.0d0, min(1.0d0, (x3q-x3%data(ka))/x3%dx))
+   az    = 1.0d0 - az1
 
-  ! Interpolating coefficients.
-  aaa(1) = ar  * aphi  * az
-  aaa(2) = ar1 * aphi  * az
-  aaa(3) = ar  * aphi1 * az
-  aaa(4) = ar1 * aphi1 * az
-  aaa(5) = ar  * aphi  * az1
-  aaa(6) = ar1 * aphi  * az1
-  aaa(7) = ar  * aphi1 * az1
-  aaa(8) = ar1 * aphi1 * az1
+   ! Interpolating coefficients.
+   aaa(1) = ax  * ay  * az
+   aaa(2) = ax  * ay1 * az
+   aaa(3) = ax1 * ay  * az
+   aaa(4) = ax1 * ay1 * az
+   aaa(5) = ax  * ay  * az1
+   aaa(6) = ax  * ay1 * az1
+   aaa(7) = ax1 * ay  * az1
+   aaa(8) = ax1 * ay1 * az1
 
-  ! Interpolation indexes.
-  idx(1) = ia
-  idx(2) = ia1
-  idx(3) = ja
-  idx(4) = ja1
-  idx(5) = ka
-  idx(6) = ka1
-end subroutine interpolate3D_coefficients
+   ! Interpolation indexes.
+   idx(1) = ia
+   idx(2) = ia1
+   idx(3) = ja
+   idx(4) = ja1
+   idx(5) = ka
+   idx(6) = ka1
+ end subroutine interpolate3D_coefficients
 
 
 !------------------------------------------------------------------------------
@@ -922,33 +928,32 @@ end subroutine interpolate3D_coefficients
     getField => NULL()
   end subroutine unloadField
 
+
   subroutine getField_3D(rq, zq, phiq, tq, out)
-    ! -----------------------------------------------------------------------
-    ! GET THE 3D FIELDS INTERPOLATION.
-    !> \brief Obtains Br, Bz, Bphi interpolated in a given point,
-    !! (R, phi, z). Linear interpolation is used.
-    ! Written by Pablo Oyola for the iHIBPsim code
-    ! -----------------------------------------------------------------------
+
     implicit none
 
     real(8), intent(in)::rq      !< Query point in R major to interpolate.
     real(8), intent(in)::zq      !< Query point in Z to interpolate.
     real(8), intent(in)::phiq    !< Query point in toroidal direciton.
     real(8), intent(in)::tq      !< Time query point.
-    real(8), intent(out)::out(6) !< Br, Bz, Bphi, Er, Ez, Ephi
-
+    real(8), intent(out)::out(6) !< Br, Bz, Bphi, Er, Rz, Ephi
+    real(8)::a000, a100, a010, a110, a001, a101, a011, a111
     ! Interpolation coefficients.
     real(8)::aaa(8)
     integer::idx(6), ia, ia1, ja, ja1, ka, ka1
-    real(8), dimension(3):: dum
+
+    ! Temporal arrays to transform from cylindrical to Cartesian.
+    real(8)::b(3), e(3), r0(3)
 
     ! First, we have to check if the data point is out of range.
     if((rq .gt. grr%x1) .or.  (zq .gt. gzz%x1) .or. (zq .lt. gzz%x0))then
-      out(1:6) = 0.0d0
+      out = 0.0d0
       return
     end if
 
     call interpolate3D_coefficients(grr, gphi, gzz, rq, phiq, zq, aaa, idx)
+
 
     ia  = idx(1)
     ia1 = idx(2)
@@ -956,43 +961,57 @@ end subroutine interpolate3D_coefficients
     ja1 = idx(4)
     ka  = idx(5)
     ka1 = idx(6)
-    dum(1) =  Brfield(ia, ja,  ka , 1)*aaa(1) + Brfield(ia1, ja,  ka , 1)*aaa(2) + &
-              Brfield(ia, ja1, ka , 1)*aaa(3) + Brfield(ia1, ja1, ka , 1)*aaa(4) + &
-              Brfield(ia, ja,  ka1, 1)*aaa(5) + Brfield(ia1, ja,  ka1, 1)*aaa(6) + &
-              Brfield(ia, ja1, ka1, 1)*aaa(7) + Brfield(ia1, ja1, ka1, 1)*aaa(8)
 
-    dum(2) =  Bzfield(ia, ja,  ka , 1)*aaa(1) + Bzfield(ia1, ja,  ka , 1)*aaa(2) + &
-              Bzfield(ia, ja1, ka , 1)*aaa(3) + Bzfield(ia1, ja1, ka , 1)*aaa(4) + &
-              Bzfield(ia, ja,  ka1, 1)*aaa(5) + Bzfield(ia1, ja,  ka1, 1)*aaa(6) + &
-              Bzfield(ia, ja1, ka1, 1)*aaa(7) + Bzfield(ia1, ja1, ka1, 1)*aaa(8)
+    a000 = aaa(1)
+    a010 = aaa(2)
+    a100 = aaa(3)
+    a110 = aaa(4)
+    a001 = aaa(5)
+    a011 = aaa(6)
+    a101 = aaa(7)
+    a111 = aaa(8)
 
-    dum(3) =  Bphifield(ia, ja,  ka , 1)*aaa(1) + Bphifield(ia1, ja,  ka , 1)*aaa(2) + &
-              Bphifield(ia, ja1, ka , 1)*aaa(3) + Bphifield(ia1, ja1, ka , 1)*aaa(4) + &
-              Bphifield(ia, ja,  ka1, 1)*aaa(5) + Bphifield(ia1, ja,  ka1, 1)*aaa(6) + &
-              Bphifield(ia, ja1, ka1, 1)*aaa(7) + Bphifield(ia1, ja1, ka1, 1)*aaa(8)
+    b(1) =    Brfield(ia, ja, ka,  1)*a000  + Brfield(ia1, ja, ka,  1)*a100  &
+           +  Brfield(ia, ja, ka1, 1)*a001  + Brfield(ia1, ja, ka1, 1)*a101  &
+           +  Brfield(ia, ja1, ka,  1)*a010 + Brfield(ia1, ja1, ka,  1)*a110  &
+           +  Brfield(ia, ja1, ka1, 1)*a011 + Brfield(ia1, ja1, ka1, 1)*a111
 
-    call pol2cart_cov((/dum(1),dum(3),dum(2) /), out(1:3), (/rq, zq, phiq/))
+    b(3) =    Bzfield(ia, ja, ka,  1)*a000  + Bzfield(ia1, ja, ka,  1)*a100  &
+           +  Bzfield(ia, ja, ka1, 1)*a001  + Bzfield(ia1, ja, ka1, 1)*a101  &
+           +  Bzfield(ia, ja1, ka,  1)*a010 + Bzfield(ia1, ja1, ka,  1)*a110  &
+           +  Bzfield(ia, ja1, ka1, 1)*a011 + Bzfield(ia1, ja1, ka1, 1)*a111
+
+    b(2) =    Bphifield(ia, ja, ka,  1)*a000  + Bphifield(ia1, ja, ka,  1)*a100  &
+           +  Bphifield(ia, ja, ka1, 1)*a001  + Bphifield(ia1, ja, ka1, 1)*a101  &
+           +  Bphifield(ia, ja1, ka,  1)*a010 + Bphifield(ia1, ja1, ka,  1)*a110  &
+           +  Bphifield(ia, ja1, ka1, 1)*a011 + Bphifield(ia1, ja1, ka1, 1)*a111
+
+    ! Tranforming from cylindrical to Cartesian components.
+    r0(3) = phiq
+    call pol2cart_cov(b, out(1:3), r0)
+
     if(flag_efield_on)then
-      dum(1) =  Erfield(ia, ja,  ka , 1)*aaa(1) + Erfield(ia1, ja,  ka , 1)*aaa(2) + &
-                Erfield(ia, ja1, ka , 1)*aaa(3) + Erfield(ia1, ja1, ka , 1)*aaa(4) + &
-                Erfield(ia, ja,  ka1, 1)*aaa(5) + Erfield(ia1, ja,  ka1, 1)*aaa(6) + &
-                Brfield(ia, ja1, ka1, 1)*aaa(7) + Erfield(ia1, ja1, ka1, 1)*aaa(8)
+        e(1) =    Erfield(ia, ja, ka,  1)*a000  + Erfield(ia1, ja, ka,  1)*a100  &
+               +  Erfield(ia, ja, ka1, 1)*a001  + Erfield(ia1, ja, ka1, 1)*a101  &
+               +  Erfield(ia, ja1, ka,  1)*a010 + Erfield(ia1, ja1, ka,  1)*a110  &
+               +  Erfield(ia, ja1, ka1, 1)*a011 + Erfield(ia1, ja1, ka1, 1)*a111
 
-      dum(2) =  Ezfield(ia, ja,  ka , 1)*aaa(1) + Ezfield(ia1, ja,  ka , 1)*aaa(2) + &
-                Ezfield(ia, ja1, ka , 1)*aaa(3) + Ezfield(ia1, ja1, ka , 1)*aaa(4) + &
-                Ezfield(ia, ja,  ka1, 1)*aaa(5) + Ezfield(ia1, ja,  ka1, 1)*aaa(6) + &
-                Ezfield(ia, ja1, ka1, 1)*aaa(7) + Ezfield(ia1, ja1, ka1, 1)*aaa(8)
+        e(3) =    Ezfield(ia, ja, ka,  1)*a000  + Ezfield(ia1, ja, ka,  1)*a100  &
+               +  Ezfield(ia, ja, ka1, 1)*a001  + Ezfield(ia1, ja, ka1, 1)*a101  &
+               +  Ezfield(ia, ja1, ka,  1)*a010 + Ezfield(ia1, ja1, ka,  1)*a110  &
+               +  Ezfield(ia, ja1, ka1, 1)*a011 + Ezfield(ia1, ja1, ka1, 1)*a111
 
-      dum(3) =  Ephifield(ia, ja,  ka , 1)*aaa(1) + Ephifield(ia1, ja,  ka , 1)*aaa(2) + &
-                Ephifield(ia, ja1, ka , 1)*aaa(3) + Ephifield(ia1, ja1, ka , 1)*aaa(4) + &
-                Ephifield(ia, ja,  ka1, 1)*aaa(5) + Ephifield(ia1, ja,  ka1, 1)*aaa(6) + &
-                Ephifield(ia, ja1, ka1, 1)*aaa(7) + Ephifield(ia1, ja1, ka1, 1)*aaa(8)
-      call pol2cart_cov((/dum(1),dum(3),dum(2) /), out(4:6), (/rq, zq, phiq/))
+        e(2) =    Ephifield(ia, ja, ka,  1)*a000  + Ephifield(ia1, ja, ka,  1)*a100  &
+               +  Ephifield(ia, ja, ka1, 1)*a001  + Ephifield(ia1, ja, ka1, 1)*a101  &
+               +  Ephifield(ia, ja1, ka,  1)*a010 + Ephifield(ia1, ja1, ka,  1)*a110  &
+               +  Ephifield(ia, ja1, ka1, 1)*a011 + Ephifield(ia1, ja1, ka1, 1)*a111
+        ! Tranforming from cylindrical to Cartesian components.
+        call pol2cart_cov(e, out(4:6), r0)
     else
       out(4:6) = 0.0d0
     end if
-    ! Now pass wot cartesian coordinates
   end subroutine getField_3D
+
 
   subroutine getField_2D(rq, zq, phiq, tq, out)
     ! -----------------------------------------------------------------------
@@ -1243,14 +1262,14 @@ end subroutine interpolate3D_coefficients
     end do
   end subroutine triangleRay
 
-  subroutine checkCollision(particle)
+  subroutine checkCollision(particle, kk)
     type(marker), intent(inout):: particle
-    integer::iloop
+    integer::iloop, kk
     if (particle%kindOfCollision .eq. 1) then
       ! We already collided with the foil, check just the scintillator, which is
       ! supposed to be the last element of the geometry array
       call triangleRay(geometry(nGeomElements)%triangleNum, geometry(nGeomElements)%triangles, &
-                       particle%position(:, istep), particle%position(:, istep + 1), &
+                       particle%position(:, kk), particle%position(:, kk + 1), &
                        particle%collision, particle%collision_point)
       if (particle%collision) then
         particle%kindOfCollision = geometry(nGeomElements)%kind
@@ -1258,7 +1277,7 @@ end subroutine interpolate3D_coefficients
     else   ! We need to loop over all the plates
       plates: do iloop=1, nGeomElements
         call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
-                         particle%position(:, istep), particle%position(:, istep + 1), &
+                         particle%position(:, kk), particle%position(:, kk + 1), &
                          particle%collision, particle%collision_point)
         if (particle%collision) then
           particle%kindOfCollision = geometry(iloop)%kind
@@ -1796,6 +1815,8 @@ end subroutine interpolate3D_coefficients
      deltaE = - FoilElossParameters(1) * FoilElossParameters(2)/cos_alpha * sqrt(MC_marker%energy0)
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (MC_marker%energy0 + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
    elseif (FoilElossModel.eq.2) then
      ! Scale the velocity
      localV = MC_marker%velocity(:, step+1)
@@ -1809,6 +1830,8 @@ end subroutine interpolate3D_coefficients
       (FoilElossParameters(2) * sqrt(Energy) + FoilElossParameters(3)*Energy)
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
    endif
 
  end subroutine foilInteraction
@@ -1842,7 +1865,7 @@ end subroutine interpolate3D_coefficients
      localV = localV/modV
      ! Scale the weight
      Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
-     MC_marker%weight =ScintillatorYieldParameters(1) * (Energy ** ScintillatorYieldParameters(2)) * MC_marker%weight
+     MC_marker%weight = MC_marker%weight * ScintillatorYieldParameters(1) * (Energy ** ScintillatorYieldParameters(2))
    endif
  end subroutine yieldScintillator
 end module sinpa_module
