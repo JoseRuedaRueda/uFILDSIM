@@ -483,7 +483,9 @@ program sinpa
         deallocate(Strike)
         deallocate(CollimatorStrikes)
         deallocate(WrongMarkers)
-        deallocate(backCollimatorStrikes)
+        if (self_shadowing) then
+          deallocate(backCollimatorStrikes)
+        endif
       enddo LXI
     enddo Lenergies
     call cpu_time(t_final_orbits)
