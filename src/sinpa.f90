@@ -352,7 +352,7 @@ program sinpa
                         backCollimatorStrikes(1:3, backCollimator) = backPart%collision_point
                         backCollimatorStrikes(4, backCollimator) = backPart%weight
                         cycle Lmarkers
-                        
+
                       endif
                     end if
                   end do backtracking
@@ -480,6 +480,7 @@ program sinpa
         deallocate(Strike)
         deallocate(CollimatorStrikes)
         deallocate(WrongMarkers)
+        deallocate(backCollimatorStrikes)
       enddo LXI
     enddo Lenergies
     call cpu_time(t_final_orbits)
