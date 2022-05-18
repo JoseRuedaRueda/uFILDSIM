@@ -1262,14 +1262,14 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     end do
   end subroutine triangleRay
 
-  subroutine checkCollision(particle)
+  subroutine checkCollision(particle, kk)
     type(marker), intent(inout):: particle
-    integer::iloop
+    integer::iloop, kk
     if (particle%kindOfCollision .eq. 1) then
       ! We already collided with the foil, check just the scintillator, which is
       ! supposed to be the last element of the geometry array
       call triangleRay(geometry(nGeomElements)%triangleNum, geometry(nGeomElements)%triangles, &
-                       particle%position(:, istep), particle%position(:, istep + 1), &
+                       particle%position(:, kk), particle%position(:, kk + 1), &
                        particle%collision, particle%collision_point)
       if (particle%collision) then
         particle%kindOfCollision = geometry(nGeomElements)%kind
@@ -1277,7 +1277,7 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     else   ! We need to loop over all the plates
       plates: do iloop=1, nGeomElements
         call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
-                         particle%position(:, istep), particle%position(:, istep + 1), &
+                         particle%position(:, kk), particle%position(:, kk + 1), &
                          particle%collision, particle%collision_point)
         if (particle%collision) then
           particle%kindOfCollision = geometry(iloop)%kind
