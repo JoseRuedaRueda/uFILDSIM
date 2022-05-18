@@ -431,7 +431,7 @@ program sinpa
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
         endif
         if ((save_self_shadowing_collimator_strike_points).and.(self_shadowing)) then
-          write(65) backCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
+          write(65) backCollimator, transpose(CollimatorStrikes(:, 1:backCollimator))
         endif
         if (save_wrong_markers_position) then
           write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
@@ -448,6 +448,9 @@ program sinpa
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
           print*, 'Not colliding', nToLaunch - cCollimator - cScintillator
+          if (self_shadowing) then
+            print*, 'Back colliding', backCollimator
+          endif
         endif
         ! Save the strike map (average everything)
         ! ToDo: correct collimator factor for the interval or launched gyrophase
