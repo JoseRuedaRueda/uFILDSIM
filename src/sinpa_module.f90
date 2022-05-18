@@ -963,12 +963,12 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     ka1 = idx(6)
 
     a000 = aaa(1)
-    a100 = aaa(2)
-    a010 = aaa(3)
+    a010 = aaa(2)
+    a100 = aaa(3)
     a110 = aaa(4)
     a001 = aaa(5)
-    a101 = aaa(6)
-    a011 = aaa(7)
+    a011 = aaa(6)
+    a101 = aaa(7)
     a111 = aaa(8)
 
     b(1) =    Brfield(ia, ja, ka,  1)*a000  + Brfield(ia1, ja, ka,  1)*a100  &
@@ -981,7 +981,7 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
            +  Bzfield(ia, ja1, ka,  1)*a010 + Bzfield(ia1, ja1, ka,  1)*a110  &
            +  Bzfield(ia, ja1, ka1, 1)*a011 + Bzfield(ia1, ja1, ka1, 1)*a111
 
-    b(3) =    Bphifield(ia, ja, ka,  1)*a000  + Bphifield(ia1, ja, ka,  1)*a100  &
+    b(2) =    Bphifield(ia, ja, ka,  1)*a000  + Bphifield(ia1, ja, ka,  1)*a100  &
            +  Bphifield(ia, ja, ka1, 1)*a001  + Bphifield(ia1, ja, ka1, 1)*a101  &
            +  Bphifield(ia, ja1, ka,  1)*a010 + Bphifield(ia1, ja1, ka,  1)*a110  &
            +  Bphifield(ia, ja1, ka1, 1)*a011 + Bphifield(ia1, ja1, ka1, 1)*a111
@@ -1001,7 +1001,7 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
                +  Ezfield(ia, ja1, ka,  1)*a010 + Ezfield(ia1, ja1, ka,  1)*a110  &
                +  Ezfield(ia, ja1, ka1, 1)*a011 + Ezfield(ia1, ja1, ka1, 1)*a111
 
-        e(3) =    Ephifield(ia, ja, ka,  1)*a000  + Ephifield(ia1, ja, ka,  1)*a100  &
+        e(2) =    Ephifield(ia, ja, ka,  1)*a000  + Ephifield(ia1, ja, ka,  1)*a100  &
                +  Ephifield(ia, ja, ka1, 1)*a001  + Ephifield(ia1, ja, ka1, 1)*a101  &
                +  Ephifield(ia, ja1, ka,  1)*a010 + Ephifield(ia1, ja1, ka,  1)*a110  &
                +  Ephifield(ia, ja1, ka1, 1)*a011 + Ephifield(ia1, ja1, ka1, 1)*a111
