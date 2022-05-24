@@ -6,8 +6,8 @@
 ! MODULE        : Auxiliar routines
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 21/04/2022
-!> \version 1.5
+!> \date 21/05/2022
+!> \version 1.6
 !> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
 !
 ! DESCRIPTION:
@@ -26,7 +26,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 5  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 6  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C

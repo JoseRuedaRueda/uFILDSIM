@@ -12,8 +12,8 @@
 ! MODULE        : Main Core
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 21/04/2022
-!> \version 1.4
+!> \date 21/05/2022
+!> \version 1.6
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -661,6 +661,12 @@ program sinpa
               cycle resample
 
             elseif (part%kindOfCollision .eq. 2) then ! Scintillator collision
+              incidentProjection = sum(ScintNormal*part%velocity(:, istep))&
+                /norm2(part%velocity(:, istep))
+              if (incidentProjection .gt. 0) then
+                ! neglect marker
+                cycle resample
+              endif
               call yieldScintillator(part, istep)
               cScintillator = cScintillator + 1 ! Update counter
               Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
