@@ -1,3 +1,9 @@
+## 2.1 Minor print
+- Print also the number of markers which collide backward with the plate
+
+## 2.0 Extra information in files
+- Strike points files now include extra information on the applied models
+
 ## 1.6 Self-shadowing
 - Included self-shadowing option in the FILDSIM simulation mode
 - Include the filter to skip markers colliding with the back of the foil in the signal part of the code

@@ -13,7 +13,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 21/05/2022
-!> \version 1.6
+!> \version 2.0
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -267,6 +267,7 @@ program sinpa
         backCollimator = 0
         cFoil = 0
         cWrong = 0
+        cInpingBack = 0
         ! -- Clean the matrices with the complete information
 
         nToLaunch = int(dble(nMap) * marker_factor(iXI) * (1.0d0 + n1/(rL(irl)-r1)**2))
@@ -321,6 +322,7 @@ program sinpa
                   /norm2(part%velocity(:, istep))
                 if (incidentProjection .gt. 0) then
                   ! neglect marker
+                  cInpingBack = cInpingBack + 1
                   cycle Lmarkers
                 endif
                 ! If we reach this point, we have collided with the
@@ -447,6 +449,7 @@ program sinpa
           endif
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
+          print*, 'Hitting Scintillator in the back', cInpingBack
           print*, 'Not colliding', nToLaunch - cCollimator - cScintillator
           if (self_shadowing) then
             print*, 'Back colliding', backCollimator
@@ -515,6 +518,19 @@ program sinpa
     ! Close all the openend files
     close(60)
     if (save_scintillator_strike_points) then
+      ! Write the foil interaction model used
+      write(61) FoilElossModel
+      if (FoilElossModel.ne.0) then
+        write(61) FoilElossParameters
+      endif
+      write(61) FoilYieldModel
+      if (FoilYieldModel.ne.0) then
+        write(61) FoilYieldParameters
+      endif
+      write(61) ScintillatorYieldModel
+      if (ScintillatorYieldModel.ne.0) then
+        write(61) ScintillatorYieldParameters
+      endif
       close(61)
     endif
     if (save_collimator_strike_points) then
@@ -559,7 +575,7 @@ program sinpa
     open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 18
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 19
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
@@ -593,7 +609,7 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(18,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(Strike(19,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     CollimatorStrikes(:,:) = 0.0d0
@@ -680,6 +696,7 @@ program sinpa
               Strike(16, cScintillator) = part%energy0 ! energy at entrance
               Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
               Strike(18, cScintillator) = part%cosalpha_foil
+              Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
               if (saveOrbits) then
                 call random_number(rand_number)
                 if (rand_number .lt. saveRatio) then
@@ -733,9 +750,23 @@ program sinpa
       print*, 'Not colliding Ions', cWrongIons
       print*, 'hitting foil', cFoil
     endif
-    ! Write time and close the file
+    ! ---- Write the extra information
+    ! Write time and shot number of the simulation
     write(61) F4Markers%time
     write(61) F4Markers%shot_number
+    ! Write the foil interaction model used
+    write(61) FoilElossModel
+    if (FoilElossModel.ne.0) then
+      write(61) FoilElossParameters
+    endif
+    write(61) FoilYieldModel
+    if (FoilYieldModel.ne.0) then
+      write(61) FoilYieldParameters
+    endif
+    write(61) ScintillatorYieldModel
+    if (ScintillatorYieldModel.ne.0) then
+      write(61) ScintillatorYieldParameters
+    endif
     close(61)
     if (save_collimator_strike_points) then
       close(62)

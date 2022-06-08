@@ -7,7 +7,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 21/05/2022
-!> \version 1.6
+!> \version 2.0
 !> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
 !
 ! DESCRIPTION:
@@ -25,8 +25,8 @@ module sinpa_module
   !----------------------------------------------------------------------------
   ! PARAMETERS
   !----------------------------------------------------------------------------
-  integer, parameter:: versionID1 = 1  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 6  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID1 = 2  !< ID version number, to identify ouput
+  integer, parameter:: versionID2 = 1  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
@@ -209,6 +209,7 @@ module sinpa_module
   integer:: cWrongNeutral !< Number of markers not colliding with the collimator neither carbon foil
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
   integer:: cWrong !< Number of ions not colliding with anything
+  integer:: cInpingBack !< Number of ions colliding in the back part of the plate
   integer:: cScintillator !< Number of markers colliding with the scintillator, for each alpha
   integer:: cFoil !< Number of markers colliding with the foil, for each alpha
   integer:: cOrb = 0!< Number of saved orbits
