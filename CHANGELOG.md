@@ -1,3 +1,6 @@
+## 2.2 Phi grid compatibility
+- Add compatibility for the case of the phi grid between 0 and 2pi
+
 ## 2.1 Minor print
 - Print also the number of markers which collide backward with the plate
 
