@@ -7,7 +7,7 @@
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
 !> \date 21/05/2022
-!> \version 2.0
+!> \version 2.2
 !> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
 !
 ! DESCRIPTION:
@@ -26,8 +26,9 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 2  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 1  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
+  real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
   real (8), parameter:: qe = 1.60217662e-19 !< Electron charge C
   !----------------------------------------------------------------------------
@@ -154,10 +155,14 @@ module sinpa_module
       real(kind=8), intent(in)::rq, zq, phiq, tq! Query points in all directions.
       real(kind=8), intent(out)::out(6) ! Br, Bz, Bphi
     end subroutine interpolateField_interface
+    subroutine coordinatesTransform(cart, pol)
+      implicit none
+      real(kind=8), intent(in)::cart(3)! input coordinates
+      real(kind=8), intent(out)::pol(3) ! Output Coordinates
+    end subroutine coordinatesTransform
   end interface
   procedure(interpolateField_interface),pointer, public::getField
-
-
+  procedure(coordinatesTransform),pointer, public::cart2pol
   ! -------------------------------------------------------------------------
   ! Variables
   ! -------------------------------------------------------------------------
@@ -484,8 +489,8 @@ contains
   end subroutine omega
 
 
-  subroutine cart2pol(cart, pol)
-    ! Created by Pablo Oyola
+  subroutine cart2pol_0_pi(cart, pol)
+    ! Created by Pablo oyola, phi is forced to be between 0 and 2pi
     implicit none
 
     real(8), intent(in)::cart(3)   !< Cartesian points (x, y, z)
@@ -494,7 +499,29 @@ contains
     pol(1) = sqrt(cart(1)**2+cart(2)**2)
     pol(2) = cart(3)
     pol(3) = atan2(cart(2), cart(1))
-  end subroutine cart2pol
+
+    ! Here it is important to move the phi angle between [0, 2pi]
+    if(pol(3) .lt. 0.0d0)then
+    pol(3) = twopi + pol(3)
+    end if
+
+    if(pol(3) .gt. twopi)then
+    pol(3) = pol(3)-twopi
+    end if
+  end subroutine cart2pol_0_pi
+
+  subroutine cart2pol_m_pi_pi(cart, pol)
+    ! Created by Jose Rueda to eliminate ifs in Pablos versions
+    ! Notice that this consider phi always between -pi and pi
+    implicit none
+
+    real(8), intent(in)::cart(3)   !< Cartesian points (x, y, z)
+    real(8), intent(out)::pol(3)   !< Polar points (r, z, phi)
+
+    pol(1) = sqrt(cart(1)**2+cart(2)**2)
+    pol(2) = cart(3)
+    pol(3) = atan2(cart(2), cart(1))
+  end subroutine cart2pol_m_pi_pi
 
 
   subroutine pol2cart(polar, cart)
@@ -528,15 +555,15 @@ contains
   end subroutine pol2cart_cov
 
 ! -----------------------------------------------------------------
-! QUICK sort of an array
-!> \brief Quick sort of array (for 1D array)
-! Taken from https://www.mjr19.org.uk/IT/sorts/
-! -----------------------------------------------------------------
-! This version maintains its own stack, to avoid needing to call
-! itself recursively. By always pushing the larger "half" to the
-! stack, and moving directly to calculate the smaller "half",
-! it can guarantee that the stack needs no more than log_2(N)
-! entries
+  ! QUICK sort of an array
+  !> \brief Quick sort of array (for 1D array)
+  ! Taken from https://www.mjr19.org.uk/IT/sorts/
+  ! -----------------------------------------------------------------
+  ! This version maintains its own stack, to avoid needing to call
+  ! itself recursively. By always pushing the larger "half" to the
+  ! stack, and moving directly to calculate the smaller "half",
+  ! it can guarantee that the stack needs no more than log_2(N)
+  ! entries
   subroutine quicksort_nr(array)
     implicit none
     real(8), intent(inout)::array(:)
@@ -740,12 +767,12 @@ contains
   end subroutine interpolate2D_coefficients
 
   ! -----------------------------------------------------------------------
-! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
-!> \brief Computes, for a three given type(base), the nearest neighbours and the
-!! normalized distance to all of them (normalized to the interval size in each direction).
-!> \detail These values are used for interpolation in 3D.
-! -----------------------------------------------------------------------
-subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
+  ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
+  !> \brief Computes, for a three given type(base), the nearest neighbours and the
+  !! normalized distance to all of them (normalized to the interval size in each direction).
+  !> \detail These values are used for interpolation in 3D.
+  ! -----------------------------------------------------------------------
+  subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
    implicit none
 
    class(grid_class), intent(in)::x1 !< Grid class for each direction.
@@ -899,12 +926,21 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     ! Prepare the interfaces for the field
     if(lr .eq. 1) then  ! We have a uniform
       getField => getField_0D
+      cart2pol => cart2pol_m_pi_pi
     elseif(lphi.eq.1)then  ! We have an axisymmetric magnetic field
       getField => getField_2D
+      cart2pol => cart2pol_m_pi_pi
     else
       getField => getField_3D ! We have an non-axisymmetric magnetic field
+      if (phimax > 3.14) then
+        print*, 'Warning, this is not optimal, please use -pi, pi grid'
+        cart2pol => cart2pol_m_pi_pi
+      else
+        cart2pol => cart2pol_0_pi
+      endif
     end if
   end subroutine parseField
+
 
   subroutine unloadField
     ! Written by Pablo Oyola for the iHIBPsim code
@@ -1123,9 +1159,7 @@ subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
     real(8), dimension(6):: field ! Field at the pinhole in cylindrical
 
     ! Calculate the pinhole position in cylindrical coordinates
-    rPinCyl(1) = sqrt(pinhole%r(1)**2 + pinhole%r(2)**2)
-    rPinCyl(2) = atan2(pinhole%r(2), pinhole%r(1))
-    rPinCyl(3) = pinhole%r(3)
+    call cart2pol(pinhole%r, rPinCyl)
 
     ! Get the magnetic field in the pinhole
     ! call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
