@@ -932,7 +932,7 @@ contains
       cart2pol => cart2pol_m_pi_pi
     else
       getField => getField_3D ! We have an non-axisymmetric magnetic field
-      if (phimax > 3.14) then
+      if (phimax > 3.15) then
         print*, 'Warning, this is not optimal, please use -pi, pi grid'
         cart2pol => cart2pol_m_pi_pi
       else
