@@ -489,7 +489,7 @@ contains
   end subroutine omega
 
 
-  subroutine cart2pol_0_pi(cart, pol)
+  subroutine cart2pol_0_2pi(cart, pol)
     ! Created by Pablo oyola, phi is forced to be between 0 and 2pi
     implicit none
 
@@ -508,7 +508,7 @@ contains
     if(pol(3) .gt. twopi)then
     pol(3) = pol(3)-twopi
     end if
-  end subroutine cart2pol_0_pi
+  end subroutine cart2pol_0_2pi
 
   subroutine cart2pol_m_pi_pi(cart, pol)
     ! Created by Jose Rueda to eliminate ifs in Pablos versions
@@ -934,9 +934,9 @@ contains
       getField => getField_3D ! We have an non-axisymmetric magnetic field
       if (phimax > 3.15) then
         print*, 'Warning, this is not optimal, please use -pi, pi grid'
-        cart2pol => cart2pol_m_pi_pi
+        cart2pol => cart2pol_0_2pi
       else
-        cart2pol => cart2pol_0_pi
+        cart2pol => cart2pol_m_pi_pi
       endif
     end if
   end subroutine parseField
