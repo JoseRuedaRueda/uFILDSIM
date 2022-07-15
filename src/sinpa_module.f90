@@ -1164,7 +1164,7 @@ contains
     ! Get the magnetic field in the pinhole
     ! call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
     ! call pol2cart_cov((/field_in_cyl(1),field_in_cyl(3), field_in_cyl(2) /), Bpinhole, rPinCyl)
-    call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field)
+    call getField(rPinCyl(1), rPinCyl(2), rPinCyl(3), 0.5d0,  field)
     Bpinhole = field(1:3)
     BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
     ! calculate the normal vectors
