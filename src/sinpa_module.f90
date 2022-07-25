@@ -170,7 +170,7 @@ module sinpa_module
   type(NBI_class) :: nbi
   real(8), dimension(:, :), allocatable:: closestPoints    !< closer points to NBI
   real(8), dimension(:), allocatable:: dPoints    !< distance to NBI
-  type(marker) :: part, backPart
+  type(marker) :: part, backPart, tempPart
   real(8) :: dt !< dt for the time integration, in s
   real(8) :: dt1
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
@@ -215,6 +215,8 @@ module sinpa_module
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
   integer:: cWrong !< Number of ions not colliding with anything
   integer:: cInpingBack !< Number of ions colliding in the back part of the plate
+  integer:: cSelfshadowed !< Number of markers shadowed
+
   integer:: cScintillator !< Number of markers colliding with the scintillator, for each alpha
   integer:: cFoil !< Number of markers colliding with the foil, for each alpha
   integer:: cOrb = 0!< Number of saved orbits
