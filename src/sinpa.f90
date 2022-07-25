@@ -249,6 +249,13 @@ program sinpa
       part%dt = dt
       allocate(backPart%position(3,backPart%n_t))
       allocate(backPart%velocity(3,backPart%n_t))
+      if (saveOrbits) then
+        tempPart%n_t = nGyro * 3 + part%n_t   ! make temporary marker to store forward and backward marker positions
+        part%dt = dt
+        allocate(tempPart%position(3,tempPart%n_t))
+        allocate(tempPart%velocity(3,tempPart%n_t))     
+    endif
+    
     endif
     Lenergies: do irl = 1, nGyroradius   ! Loop over energies (gyroradii)
       ! Get a dummy velocity modulus
@@ -264,10 +271,11 @@ program sinpa
         ! -- Initialise all the counters
         cScintillator = 0
         cCollimator = 0
-        backCollimator = 0
+        ! backCollimator = 0
         cFoil = 0
         cWrong = 0
         cInpingBack = 0
+        cSelfshadowed = 0
         ! -- Clean the matrices with the complete information
 
         nToLaunch = int(dble(nMap) * marker_factor(iXI) * (1.0d0 + n1/(rL(irl)-r1)**2))
@@ -350,10 +358,11 @@ program sinpa
                     if (backPart%collision) then
                       if (backPart%kindOfCollision .eq. 0) then
                         ! Collided with the collimator, dead marker
-                        backCollimator = backCollimator + 1
-                        backCollimatorStrikes(1:3, backCollimator) = backPart%collision_point
-                        backCollimatorStrikes(4, backCollimator) = backPart%weight
-                        cycle Lmarkers
+                        !backCollimator = backCollimator + 1
+                        cSelfshadowed = cSelfshadowed +1
+                        backCollimatorStrikes(1:3, cSelfshadowed) = backPart%collision_point
+                        backCollimatorStrikes(4, cSelfshadowed) = backPart%weight
+                                                cycle Lmarkers
 
                       endif
                     end if
@@ -390,7 +399,21 @@ program sinpa
                     ! Save the collision point in the trajectory for future use
                     part%position(:, istep+1) = part%collision_point
                     cOrb = cOrb + 1
-                    call saveOrbit(63, part, istep+1, saveOrbitLongMode)
+                    if (self_shadowing) then
+                      tempPart%rl = part%rl
+                      tempPart%xi = part%xi
+                      tempPart%kindOfCollision = 3
+                      
+                      tempPart%position(:,:iiistep) = backPart%position(:, (iiistep) :  1: -1)
+                      tempPart%position(:, (iiistep+1):(iiistep+2+istep) ) = part%position(:, :istep+1)
+                  
+                      tempPart%velocity(:,:(iiistep)) = backPart%velocity(:, (iiistep) :  1: -1)
+                      tempPart%velocity(:, (iiistep+1):(iiistep+2+istep) ) = part%velocity(:, :istep+1)
+                      
+                      call saveOrbit(63, tempPart, istep + iiistep+1, saveOrbitLongMode)
+                    else
+                      call saveOrbit(63, part, istep+1, saveOrbitLongMode)
+                    endif
                   endif
                 endif
                 cycle Lmarkers
@@ -433,7 +456,7 @@ program sinpa
           write(62) cCollimator, transpose(CollimatorStrikes(:, 1:cCollimator))
         endif
         if ((save_self_shadowing_collimator_strike_points).and.(self_shadowing)) then
-          write(65) backCollimator, transpose(backCollimatorStrikes(:, 1:backCollimator))
+          write(65) cSelfshadowed, transpose(backCollimatorStrikes(:, 1:cSelfshadowed))
         endif
         if (save_wrong_markers_position) then
           write(64) cWrong, transpose(WrongMarkers(:, 1:cWrong))
@@ -450,9 +473,9 @@ program sinpa
           print*, 'Hitting Collimator', cCollimator
           print*, 'Hitting Scintillator', cScintillator
           print*, 'Hitting Scintillator in the back', cInpingBack
-          print*, 'Not colliding', nToLaunch - cCollimator - cScintillator
+          print*, 'Not colliding', nToLaunch - cCollimator - cScintillator - cSelfshadowed
           if (self_shadowing) then
-            print*, 'Back colliding', backCollimator
+            print*, 'Back colliding', cSelfshadowed
           endif
         endif
         ! Save the strike map (average everything)
@@ -552,7 +575,14 @@ program sinpa
     deallocate(StrikeMap)
     deallocate(part%position)
     deallocate(part%velocity)
-
+    if (self_shadowing) then
+      deallocate(backPart%position)
+      deallocate(backPart%velocity)
+      if(saveOrbits)then
+          deallocate(tempPart%position)
+          deallocate(tempPart%velocity)  
+      endif
+  endif 
   endif mapeado
   !-----------------------------------------------------------------------------
   !=============================================================================
