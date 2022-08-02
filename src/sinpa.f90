@@ -85,6 +85,11 @@ program sinpa
       allocate(FoilElossParameters(3))
       if (verbose) then
         print*,'SRIM energy loss will be applied'
+      endif    
+      elseif (FoilElossModel .eq. 3) then
+      allocate(FoilElossParameters(3))
+      if (verbose) then
+        print*,'Linear energy loss will be applied'
       endif
     elseif (FoilElossModel .eq. 0) then
       if (verbose) then

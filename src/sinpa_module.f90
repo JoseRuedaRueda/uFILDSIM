@@ -1836,7 +1836,7 @@ contains
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1)
    elseif (FoilYieldModel.eq.2) then
      ! estimate the ionization efficiency
-     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) *MC_marker%energy0 / M)
+     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) * MC_marker%energy0 / M)
      ! Scale the weight
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1) * yield
    endif
@@ -1865,6 +1865,21 @@ contains
      Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
      deltaE = - FoilElossParameters(1)/cos_alpha * &
       (FoilElossParameters(2) * sqrt(Energy) + FoilElossParameters(3)*Energy)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
+    elseif (FoilElossModel.eq.3) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilElossParameters(1)/cos_alpha * &
+      (FoilElossParameters(2) * Energy + FoilElossParameters(3))
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
      ! Save the cosalpha value
