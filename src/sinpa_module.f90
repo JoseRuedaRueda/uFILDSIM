@@ -206,7 +206,7 @@ module sinpa_module
   character (len=1000) :: ScintillatorFile !< Scintillator file
   character (len=1000) :: input_filename !< Scintillator file
   character (len=1000) :: runFolder !< root directory of SINPA
-  character (len=1000) :: FIDASIMfolder !< root directory of SINPA
+  character (len=1000) :: FIDASIMfolder = ''!< root directory of SINPA
 
   ! --- Counters
   integer:: cCollimator !< Number of markers impinging the collimator
@@ -1176,6 +1176,7 @@ contains
     ! See handwritten SINPA notes for full explanation with 3D drawings
     if (e1mod.lt.0.001) then ! B is in line with u2
       print*, Bpinhole
+      print*, pinhole%u3
       print*, 'B field normal to the pinhole. Option not considered'
       print*, 'Write to jrrueda@us.es'
       stop
@@ -1536,7 +1537,6 @@ contains
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
 
-
     ! read the plates
     allocate(geometry(n))
     do i = 1,n
@@ -1836,7 +1836,7 @@ contains
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1)
    elseif (FoilYieldModel.eq.2) then
      ! estimate the ionization efficiency
-     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) *MC_marker%energy0 / M)
+     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) * MC_marker%energy0 / M)
      ! Scale the weight
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1) * yield
    endif
@@ -1865,6 +1865,40 @@ contains
      Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
      deltaE = - FoilElossParameters(1)/cos_alpha * &
       (FoilElossParameters(2) * sqrt(Energy) + FoilElossParameters(3)*Energy)
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
+   elseif (FoilElossModel.eq.4) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     if (Energy-FoilElossParameters(3).gt.0.0) then
+      deltaE = - FoilElossParameters(1)/cos_alpha * &
+        (FoilElossParameters(2) * sqrt(Energy-FoilElossParameters(3)))
+     else
+      deltaE = 0.0
+     endif
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
+    elseif (FoilElossModel.eq.3) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilElossParameters(1)/cos_alpha * &
+      (FoilElossParameters(2) * Energy + FoilElossParameters(3))
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
      ! Save the cosalpha value

@@ -1,3 +1,7 @@
+## 2.3 Bck
+- Add save orbit of backtracing-selfshadowing
+- Add linear model to foil energy loss
+
 ## 2.2 Phi grid compatibility
 - Add compatibility for the case of the phi grid between 0 and 2pi
 
