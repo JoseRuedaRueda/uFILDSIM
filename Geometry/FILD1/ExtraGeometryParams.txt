@@ -1,4 +1,5 @@
 &ExtraGeometryParams   ! Namelist with the extra geometric parameters
+  nGeomElements = 2,
   ! Pinhole
   rPin(1) = 0.040,        ! Position of the pinhole XYZ
   rPin(2) = 0.0,
@@ -7,7 +8,6 @@
   d1 = 0.00059  ! Pinhole radius, or size along u1 (in m)
   d2 = 0.00269   ! Size along u2, not used if we have a circular pinhole
   !- Number of Geometry files to load
-  nGeomElements = 2
   ! Unitary vectors:
   u1(1) =  1.0
   u1(2) =  0.0
