@@ -199,23 +199,17 @@ program sinpa
       print*, '-----------------------------------------------------------------'
       print*,'Performing mapping'
     endif
-    ! --- Allocate the necesary matrices
     if (FILDSIMmode) then
       allocate(StrikeMap(9,nGyroradius * nxi))  ! Strike map
-      dummy_shape = 12    ! Get the size (to later write it in the file)
+    !   dummy_shape = 12    ! Get the size (to later write it in the file)
     else
       allocate(StrikeMap(13,nGyroradius * nxi))  ! Strike map
-      dummy_shape = 19    ! Get the size (to later write it in the file)
+    !   dummy_shape = 19    ! Get the size (to later write it in the file)
     endif
-
-    ! --- Open the files to save the data
-    ! -- Strike points on the scintillator
-    if (save_scintillator_strike_points) then
-      open(unit=61, file=trim(runFolder)//&
-           '/results/'//trim(runID)//'.spmap', access = 'stream', action='write', status='replace')
-      ! Save the header of the file
-      write(61) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), dummy_shape
-    endif
+    ! --- Prepare the strike file and format
+    call writeStrikeFileHeader(trim(runFolder)//'/results/'//trim(runID)//&
+                               '.spmap', 61, kindOfstrikeScintFile, save_scintillator_strike_points,&
+                               dummy_shape)
     ! -- Strike points on the collimator
     if (save_collimator_strike_points) then
       open(unit=62, file=trim(runFolder)//&
@@ -293,11 +287,7 @@ program sinpa
           print*,'---'
           print*, 'Following: ', nToLaunch, ' markers'
         endif
-        if (FILDSIMmode) then
-          allocate(Strike(12,nToLaunch+1))            ! Strike points in the scint
-        else
-          allocate(Strike(19,nToLaunch+1))            ! Strike points in the scint
-        endif
+        allocate(Strike(dummy_shape,nToLaunch+1))            ! Strike points in the scint
         allocate(CollimatorStrikes(4,nToLaunch+1))       ! Strike position on the coll
         allocate(WrongMarkers(4,nToLaunch+1))       ! Strike position on the coll
         CollimatorStrikes(:,:) = 0.0d0
@@ -382,26 +372,7 @@ program sinpa
 
                 call yieldScintillator(part, istep)
                 cScintillator = cScintillator + 1 ! Update counter
-                ! Save the common FILD and INPA variables:
-                ! Store the other information of the marker
-                Strike(1:3, cScintillator ) = part%collision_point ! f point
-                Strike(4, cScintillator) = part%weight ! weight
-                Strike(5, cScintillator) = part%beta ! Beta angle
-                Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
-                Strike(9:11, cScintillator ) = &
-                  MATMUL(rotation, part%collision_point - ps) ! f pos scint
-                Strike(12, cScintillator) = &
-                    180/pi*acos(incidentProjection) ! incident angle
-                ! Save INPA extra varialbes
-                if (FILDSIMmode.eqv..False.) then
-                  call minimumDistanceLines(part%position(:, 1), &
-                                            part%velocity(:, 1)/v0, nbi%p0,&
-                                            nbi%u, dMin, posMin)
-
-                  Strike(13:15,cScintillator) = posMin   ! Initial point (NBI)
-                  Strike(16:18,cScintillator) = part%velocity(:, 1)  ! Initial velocity
-                  Strike(19, cScintillator) = dMin ! Closer distance to NBI
-                endif
+                call savePartToStrike(part, cScintillator)
 
                 if (saveOrbits) then
                   call random_number(rand_number)
@@ -615,7 +586,7 @@ program sinpa
     open(unit=61, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
     ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 19
+    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 22
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
@@ -649,7 +620,7 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(19,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(Strike(22,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     CollimatorStrikes(:,:) = 0.0d0
@@ -737,6 +708,7 @@ program sinpa
               Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
               Strike(18, cScintillator) = part%cosalpha_foil
               Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
+              Strike(20:22, cScintillator) = part%ionization_point
               if (saveOrbits) then
                 call random_number(rand_number)
                 if (rand_number .lt. saveRatio) then
@@ -752,6 +724,7 @@ program sinpa
               part%dt = dt   ! Good dt to evolve an ion
               part%qm = Zout * qe / M /amu_to_kg ! New charge after the foil
               part%position(:, istep + 1) = part%collision_point
+              part%ionization_point = part%collision_point
               call foilInteraction(part,foilNormal, istep )
               cFoil = cFoil + 1 ! Update the counter
             else

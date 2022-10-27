@@ -1,3 +1,10 @@
+## 4.0 Torwards interfaces
+- First step to move torwards interfaces and forget about dummy ifs
+- New strike file formats added
+
+## 3.0 Ionization position
+- Save ionization position of signal markers in the strike file
+
 ## 2.3 Bck
 - Add save orbit of backtracing-selfshadowing
 - Add linear model to foil energy loss

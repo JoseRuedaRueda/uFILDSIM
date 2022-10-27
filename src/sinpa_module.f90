@@ -25,8 +25,8 @@ module sinpa_module
   !----------------------------------------------------------------------------
   ! PARAMETERS
   !----------------------------------------------------------------------------
-  integer, parameter:: versionID1 = 2  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID1 = 4  !< ID version number, to identify ouput
+  integer, parameter:: versionID2 = 0  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
@@ -54,10 +54,11 @@ module sinpa_module
       real (8), dimension(:,:), allocatable:: position !< Particle position in cm
       real (8), dimension(:,:), allocatable:: velocity !< Particle velocity in cm/s
       real (8):: energy0 !< particle energy at the entrance (keV)
-      real (8):: weight  !< Weight of the markers, [part/s/cm^2 of pinhole, for FIDASIM, in au, for mapping]
+      real (8):: weight  !< Weight of the markers, [part/s of pinhole, for FIDASIM, in au, for mapping]
       real (8):: type    !< Marker type: identify if is active or passive, follows FIDASIM criteria
       logical :: collision = .FALSE. !< Flag for the collision
-      real (8), dimension(3) :: collision_point !< Point of collision in cm
+      real (8), dimension(3) :: collision_point !< Point of collision in m
+      real (8), dimension(3) :: ionization_point !< Point of ionization in m
       real (8):: qm !< q over m, SI
       ! For the mapping
       real (8):: xi  !< xi angle (or pitch for FILD), radians
@@ -67,6 +68,7 @@ module sinpa_module
       real (8):: dt !< dt for the integration [s]
       integer::kindOfCollision ! With whom has collide
       real (8):: cosalpha_foil ! cos alpha inpinging in the INPA foil
+
   end type marker
 
   ! ABSTRACT CLASS FOR THE FIELDS
@@ -98,14 +100,6 @@ module sinpa_module
   !   real(8):: depth
   ! end type scatteringData
   !
-  !
-  ! type :: sigma_optics
-  !   ! Sigma for the model of optical resolution
-  !   integer :: no                 ! Number of points
-  !   real(8),dimension(3):: optical_axis ! Position of the optical axis
-  !   real(8):: delta       !
-  !   real(8), dimension(:), allocatable :: dist,so
-  ! end type sigma_optics
 
   ! ABSTRACT CLASS FOR THE NBI
   ! >/briefg NBI geometry
@@ -120,7 +114,7 @@ module sinpa_module
     ! real(8), dimension(:), allocatable :: Phipoints !< Phi coordinate of the points
   end type NBI_class
 
-
+  ! ABSTRACT CLASS FOR THE NBI
   !> \brief Contains the data of 1D direction in a compact type.
   type:: grid_class
     real(8), allocatable::data(:)   !< Contains the points of the grid.
@@ -130,6 +124,7 @@ module sinpa_module
     real(8)::dx                     !< Difference between consecutive points.
   end type grid_class
 
+  ! ABSTRACT CLASS FOR THE Pinhole reference system
   !> \brief Contains the reference system in the pinhole
   type :: pinhole_system_type
     integer:: kind  !< kind of pinhole (circle, 0) (rectangle, 1)
@@ -150,19 +145,29 @@ module sinpa_module
   ! Interfaces
   ! ---------------------------------------------------------------------------
   abstract interface
+    ! Pointer for the field interpolator
     subroutine interpolateField_interface(rq, zq, phiq, tq, out)
       implicit none
       real(kind=8), intent(in)::rq, zq, phiq, tq! Query points in all directions.
       real(kind=8), intent(out)::out(6) ! Br, Bz, Bphi
     end subroutine interpolateField_interface
+    ! pointer for the coordinate transform
     subroutine coordinatesTransform(cart, pol)
       implicit none
-      real(kind=8), intent(in)::cart(3)! input coordinates
+      real(kind=8), intent(in)::cart(3) ! input coordinates
       real(kind=8), intent(out)::pol(3) ! Output Coordinates
     end subroutine coordinatesTransform
+    ! pointer for the data storage
+    subroutine savePartToStrikeMatrix(particle, k)
+      import marker
+      type(marker), intent(in)::particle ! marker to be saved
+      integer, intent(in)::k     ! place to be storaged in the matrix
+    end subroutine savePartToStrikeMatrix
   end interface
   procedure(interpolateField_interface),pointer, public::getField
   procedure(coordinatesTransform),pointer, public::cart2pol
+  procedure(savePartToStrikeMatrix),pointer, public::savePartToStrike
+  
   ! -------------------------------------------------------------------------
   ! Variables
   ! -------------------------------------------------------------------------
@@ -281,6 +286,7 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
+  integer:: kindOfstrikeScintFile = 1 !< Kind of output strike file
   logical:: save_self_shadowing_collimator_strike_points = .false. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
@@ -538,13 +544,14 @@ contains
     cart(3) = polar(2)
   end subroutine pol2cart
 
-  ! -----------------------------------------------------------------
-  ! POLAR TO CARTESIAN COORDINATES (COVARIANT VERSION)
-  !> \brief Covariant transformation from polar coordinates to cartesian coordinates
-  !! (i.e. velocities).
-  ! Created by Pablo Oyola
-  ! -----------------------------------------------------------------
+
   subroutine pol2cart_cov(vpol, vcart, r0)
+    ! -----------------------------------------------------------------
+    ! POLAR TO CARTESIAN COORDINATES (COVARIANT VERSION)
+    !> \brief Covariant transformation from polar coordinates to cartesian coordinates
+    !! (i.e. velocities).
+    ! Created by Pablo Oyola
+    ! -----------------------------------------------------------------
     implicit none
 
     real(8), intent(out)::vcart(3)  !< Cartesian components (Ax, Ay, Az)
@@ -557,16 +564,17 @@ contains
   end subroutine pol2cart_cov
 
 ! -----------------------------------------------------------------
-  ! QUICK sort of an array
-  !> \brief Quick sort of array (for 1D array)
-  ! Taken from https://www.mjr19.org.uk/IT/sorts/
-  ! -----------------------------------------------------------------
-  ! This version maintains its own stack, to avoid needing to call
-  ! itself recursively. By always pushing the larger "half" to the
-  ! stack, and moving directly to calculate the smaller "half",
-  ! it can guarantee that the stack needs no more than log_2(N)
-  ! entries
+
   subroutine quicksort_nr(array)
+    ! QUICK sort of an array
+    !> \brief Quick sort of array (for 1D array)
+    ! Taken from https://www.mjr19.org.uk/IT/sorts/
+    ! -----------------------------------------------------------------
+    ! This version maintains its own stack, to avoid needing to call
+    ! itself recursively. By always pushing the larger "half" to the
+    ! stack, and moving directly to calculate the smaller "half",
+    ! it can guarantee that the stack needs no more than log_2(N)
+    ! entries
     implicit none
     real(8), intent(inout)::array(:)
     real(8) :: temp,pivot
@@ -652,46 +660,11 @@ contains
 
     enddo
   end subroutine quicksort_nr
+
+
 !-------------------------------------------------------------------------------
 ! SECTION 2: NBI
 !-------------------------------------------------------------------------------
-  ! subroutine initNBI(filename, nbi)
-  !   ! ------------------------------------------------------------------
-  !   ! Initialise the NBI object
-  !   !> \brief Initialise the NBI object
-  !   !> \detail Load data from the NBI file and create the series of points
-  !   ! along the NBI line to be latter used for mapping
-  !   !
-  !   ! Written Jose Rueda Rueda
-  !   ! ------------------------------------------------------------------
-  !   ! ----
-  !   ! INPUTS:
-  !   character (len=*), intent(in):: filename  !< file with NBI data
-  !   ! Outputs:
-  !   type(NBI_class), intent(out):: nbi   !< NBI object
-  !   ! Local variables
-  !   integer :: ii
-  !   ! ---
-  !
-  !   ! Open the file and read:
-  !   open(60, file=filename, form = 'formatted', status='old', action='read')
-  !   read(60, NML=nbi_namelist)
-  !   close(60)
-  !   nbi%p0 = p0
-  !   nbi%u = u
-  !   nbi%npoints = npoints
-  !   nbi%d = d
-  !
-  !   ! calculate the points along the line
-  !   allocate(nbi%points(3, npoints))
-  !   allocate(nbi%Rpoints(npoints))
-  !   do ii = 1,npoints
-  !     nbi%points(:, ii) = p0 + ii * u
-  !     nbi%rpoints(ii) = sqrt(nbi%points(1, ii)**2 + nbi%points(2, ii)**2)
-  !     nbi%phipoints(ii) = atan2(nbi%points(2, ii), nbi%points(1, ii))
-  !   end do
-  ! end subroutine initNBI
-
   subroutine minimumDistanceLines(p, v, r, w, d_local, point)
     ! -------------------------------------------------------------------------
     ! Get the minimum distance between two lines
@@ -724,6 +697,8 @@ contains
     d_local = sqrt(d0(1)**2 + d0(2)**2 + d0(3)**2)
     point = p + (beta - gamma * alpha)/(gamma**2-1)*v
   end subroutine minimumDistanceLines
+
+
 !------------------------------------------------------------------------------
 ! SECTION 3: COEFFICIENTS FOR INTERPOLATORS
 !------------------------------------------------------------------------------
@@ -768,13 +743,14 @@ contains
     idx(4) = ja1
   end subroutine interpolate2D_coefficients
 
-  ! -----------------------------------------------------------------------
-  ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
-  !> \brief Computes, for a three given type(base), the nearest neighbours and the
-  !! normalized distance to all of them (normalized to the interval size in each direction).
-  !> \detail These values are used for interpolation in 3D.
-  ! -----------------------------------------------------------------------
+
   subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
+    ! -----------------------------------------------------------------------
+    ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
+    !> \brief Computes, for a three given type(base), the nearest neighbours and the
+    !! normalized distance to all of them (normalized to the interval size in each direction).
+    !> \detail These values are used for interpolation in 3D.
+    ! -----------------------------------------------------------------------
    implicit none
 
    class(grid_class), intent(in)::x1 !< Grid class for each direction.
@@ -818,7 +794,7 @@ contains
    idx(4) = ja1
    idx(5) = ka
    idx(6) = ka1
- end subroutine interpolate3D_coefficients
+  end subroutine interpolate3D_coefficients
 
 
 !------------------------------------------------------------------------------
@@ -1191,6 +1167,7 @@ contains
                        + pinhole%e3(3)*pinhole%u3(3))
   end subroutine Bsystem
 
+
 !-------------------------------------------------------------------------------
 ! SECTION 5: COLLISION CHECK and INTEGRATOR
 !-------------------------------------------------------------------------------
@@ -1414,6 +1391,7 @@ contains
     r1 = r_plus_half + 0.50d0*v1*dt
   end subroutine pushParticle
 
+
 !-------------------------------------------------------------------------------
 ! SECTION 6: PLATE SETUP
 !-------------------------------------------------------------------------------
@@ -1584,6 +1562,7 @@ contains
     endif
   end subroutine readGeometry
 
+
 !------------------------------------------------------------------------------
 ! SECTION 7: FIDASIM compatibility
 !------------------------------------------------------------------------------
@@ -1636,9 +1615,10 @@ contains
     endif
   end subroutine readFIDASIM4Markers
 
- !------------------------------------------------------------------------------
- ! SECTION 8: Initialization of markers
- !------------------------------------------------------------------------------
+
+!------------------------------------------------------------------------------
+! SECTION 8: Initialization of markers
+!------------------------------------------------------------------------------
  subroutine initMarker(vmod, dt_initial, xxi, beta_min, dbeta, rli)
    ! -----------------------------------------------------------------------
    ! Initialise the marker
@@ -1774,9 +1754,10 @@ contains
    endif
  end subroutine calculate_betas
 
- !-----------------------------------------------------------------------------
- ! SECTION 9: Saving
- !-----------------------------------------------------------------------------
+
+!-----------------------------------------------------------------------------
+! SECTION 9: Saving
+!-----------------------------------------------------------------------------
  subroutine saveOrbit(fid, marker_to_save, step_to_save, long_flag)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1806,9 +1787,106 @@ contains
    endif
  end subroutine saveOrbit
 
- !-----------------------------------------------------------------------------
- ! SECTION 10: Foil interaction
- !-----------------------------------------------------------------------------
+ subroutine writeStrikeFileHeader(filename, fid, kindOfFile, flag, nCol)
+   ! -----------------------------------------------------------------------
+   ! Open the strike file and prepare the strike size
+   !> \brief Save the orbit into the binary file
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - fid: FID of the file where to write (it should be open already)
+   !  - marker to save: marker to be saved
+   !  - step_to_save: Maximum step to be saved in the trajectory
+   !  - long_flag: if true to so called 'long' format will be used
+   ! -----------------------------------------------------------------------
+   !Dummy variables
+   character(*), intent(in) :: filename
+   integer, intent(in) :: fid
+   integer, intent(in) :: kindOfFile
+   logical, intent(in) :: flag
+   integer, intent(out) :: nCol
+
+   if (FILDSIMmode.and.(kindOfFile.eq.1))then
+    nCol = 12
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeFILD1
+   elseif (FILDSIMmode.and.(kindOfFile.eq.2)) then
+    nCol = 14
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeFILD2
+   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.1)) then
+    nCol = 19
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeINPA1
+   endif
+   if (flag) then
+    open(unit=fid, file=trim(filename), access = 'stream', action='write', status='replace')
+    write(fid) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), nCol, kindOfFile
+   endif
+
+  
+
+
+ end subroutine writeStrikeFileHeader
+
+ subroutine savePartToStrikeFILD1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+ end subroutine savePartToStrikeFILD1
+
+ subroutine savePartToStrikeFILD2(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  real(8) :: v1, v2
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+  v1 = sum(pinhole%e1*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
+  v2 = sum(pinhole%e2*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
+  Strike(13, cScintillator) = v1
+  Strike(14, cScintillator) = v2
+
+ end subroutine savePartToStrikeFILD2
+
+ subroutine savePartToStrikeINPA1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+  call minimumDistanceLines(part%position(:, 1), &
+    part%velocity(:, 1)/v0, nbi%p0,&
+    nbi%u, dMin, posMin)
+  Strike(13:15,cScintillator) = posMin   ! Initial point (NBI)
+  Strike(16:18,cScintillator) = part%velocity(:, 1)  ! Initial velocity
+  Strike(19, cScintillator) = dMin ! Closer distance to NBI
+ end subroutine savePartToStrikeINPA1
+!-----------------------------------------------------------------------------
+! SECTION 10: Foil interaction
+!-----------------------------------------------------------------------------
  subroutine foilInteraction(MC_marker, normal, step)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1907,9 +1985,10 @@ contains
 
  end subroutine foilInteraction
 
- !-----------------------------------------------------------------------------
- ! SECTION 11: Yield modelling
- !-----------------------------------------------------------------------------
+
+!-----------------------------------------------------------------------------
+! SECTION 11: Yield modelling
+!-----------------------------------------------------------------------------
  subroutine yieldScintillator(MC_marker, step)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1939,4 +2018,5 @@ contains
      MC_marker%weight = MC_marker%weight * ScintillatorYieldParameters(1) * (Energy ** ScintillatorYieldParameters(2))
    endif
  end subroutine yieldScintillator
+
 end module sinpa_module
