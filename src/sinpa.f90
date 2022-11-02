@@ -583,10 +583,8 @@ program sinpa
     endif
     ! --- Open the file to save the data
     ! -- Strike points on the scintillator
-    open(unit=61, file=trim(runFolder)//&
-         '/results/'//trim(runID)//'.spsignal', access = 'stream', action='write')
-    ! Save the header of the file
-    write(61) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), 22
+    call writeStrikeFileHeader(trim(runFolder)//&
+    '/results/'//trim(runID)//'.spsignal', 61, kindOfstrikeScintFile+100, .TRUE., dummy_shape)
     ! -- Strike points on the collimator
     open(unit=62, file=trim(runFolder)//&
          '/results/'//trim(runID)//'.spcsignal', access = 'stream', action='write')
@@ -620,7 +618,7 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(22,F4Markers%counter*nResampling))            ! Strike points in the scint
+    allocate(Strike(dummy_shape,F4Markers%counter*nResampling))            ! Strike points in the scint
     allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
     CollimatorStrikes(:,:) = 0.0d0
@@ -696,19 +694,7 @@ program sinpa
               endif
               call yieldScintillator(part, istep)
               cScintillator = cScintillator + 1 ! Update counter
-              Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
-              Strike(2:4, cScintillator ) = part%collision_point ! f point
-              Strike(5:7, cScintillator ) = &
-                MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
-              Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
-              Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
-              Strike(14,cScintillator) = part%weight ! weight
-              Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
-              Strike(16, cScintillator) = part%energy0 ! energy at entrance
-              Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
-              Strike(18, cScintillator) = part%cosalpha_foil
-              Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
-              Strike(20:22, cScintillator) = part%ionization_point
+              call savePartToStrikeSignal(part, cScintillator)
               if (saveOrbits) then
                 call random_number(rand_number)
                 if (rand_number .lt. saveRatio) then

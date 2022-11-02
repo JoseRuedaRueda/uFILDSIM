@@ -163,10 +163,16 @@ module sinpa_module
       type(marker), intent(in)::particle ! marker to be saved
       integer, intent(in)::k     ! place to be storaged in the matrix
     end subroutine savePartToStrikeMatrix
+    subroutine savePartToStrikeMatrixSignal(particle, k)
+      import marker
+      type(marker), intent(in)::particle ! marker to be saved
+      integer, intent(in)::k     ! place to be storaged in the matrix
+    end subroutine savePartToStrikeMatrixSignal
   end interface
   procedure(interpolateField_interface),pointer, public::getField
   procedure(coordinatesTransform),pointer, public::cart2pol
   procedure(savePartToStrikeMatrix),pointer, public::savePartToStrike
+  procedure(savePartToStrikeMatrixSignal),pointer, public::savePartToStrikeSignal
   
   ! -------------------------------------------------------------------------
   ! Variables
@@ -301,7 +307,8 @@ module sinpa_module
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
-    save_wrong_markers_position, save_scintillator_strike_points, self_shadowing, &
+    save_wrong_markers_position, save_scintillator_strike_points, &
+    kindOfstrikeScintFile, self_shadowing, &
     save_self_shadowing_collimator_strike_points
 
   ! --- Input
@@ -1607,7 +1614,7 @@ contains
     read(60) dummy2D
     F4Markers%v = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy1D
-    F4Markers%wght = dble(dummy1D) * pinhole%d1**2 * pi
+    F4Markers%wght = dble(dummy1D) !* pinhole%d1**2 * pi
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
     if (verbose) then
@@ -1818,10 +1825,18 @@ contains
     nCol = 19
     ! Set the pointers to the store functions
     savePartToStrike => savePartToStrikeINPA1
+   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.101)) then
+      nCol = 22
+      ! Set the pointers to the store functions
+      savePartToStrikeSignal => savePartToStrikeINPASignal1
    endif
-   if (flag) then
+
+   if (flag .and. (kindOfFile.lt.101)) then
     open(unit=fid, file=trim(filename), access = 'stream', action='write', status='replace')
     write(fid) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), nCol, kindOfFile
+   elseif (flag .and. (kindOfFile.gt.100)) then 
+    open(unit=fid, file=trim(filename), access = 'stream', action='write', status='replace')
+    write(fid) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), nCol, kindOfFile
    endif
 
   
@@ -1884,6 +1899,25 @@ contains
   Strike(16:18,cScintillator) = part%velocity(:, 1)  ! Initial velocity
   Strike(19, cScintillator) = dMin ! Closer distance to NBI
  end subroutine savePartToStrikeINPA1
+
+ subroutine savePartToStrikeINPASignal1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
+  Strike(2:4, cScintillator ) = part%collision_point ! f point
+  Strike(5:7, cScintillator ) = &
+     MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
+  Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
+  Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
+  Strike(14,cScintillator) = part%weight ! weight
+  Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
+  Strike(16, cScintillator) = part%energy0 ! energy at entrance
+  Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
+  Strike(18, cScintillator) = part%cosalpha_foil
+  Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
+  Strike(20:22, cScintillator) = part%ionization_point 
+ end subroutine savePartToStrikeINPASignal1
 !-----------------------------------------------------------------------------
 ! SECTION 10: Foil interaction
 !-----------------------------------------------------------------------------
