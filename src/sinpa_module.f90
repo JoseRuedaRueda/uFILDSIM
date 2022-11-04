@@ -1862,7 +1862,7 @@ contains
   ! Dummy variables
   type(marker), intent(in):: particle
   integer, intent(in) :: counter
-  real(8) :: v1, v2
+  real(8) :: v1, v2, v3, rparticle(3), dummy34(6)
   Strike(1:3, cScintillator ) = part%collision_point ! f point
   Strike(4, cScintillator) = part%weight ! weight
   Strike(5, cScintillator) = part%beta ! Beta angle
@@ -1875,8 +1875,13 @@ contains
     /norm2(part%velocity(:, istep))
   v2 = sum(pinhole%e2*part%velocity(:, istep))&
     /norm2(part%velocity(:, istep))
+  v3 = sum(pinhole%e3*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
   Strike(13, cScintillator) = v1
   Strike(14, cScintillator) = v2
+  call cart2pol(part%position(:, istep), rparticle)
+  call getField(rparticle(1), rparticle(2), rparticle(3), 0.0d0, dummy34)
+  write(114,'(6F14.6)') v1, v2, v3, dummy34(1:3)
 
  end subroutine savePartToStrikeFILD2
 
