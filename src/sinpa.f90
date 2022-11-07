@@ -210,7 +210,7 @@ program sinpa
     call writeStrikeFileHeader(trim(runFolder)//'/results/'//trim(runID)//&
                                '.spmap', 61, kindOfstrikeScintFile, save_scintillator_strike_points,&
                                dummy_shape)
-    open(unit=60, file=trim(runFolder)//'/results/'&
+    open(unit=114, file=trim(runFolder)//'/results/'&
       //trim(runID)//'strikes.txt', action='write', form='formatted')
 
     ! -- Strike points on the collimator
