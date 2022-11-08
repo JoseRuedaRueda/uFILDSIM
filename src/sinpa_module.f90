@@ -1563,6 +1563,9 @@ contains
       print*, 'Pinhole u1', pinhole%u1
       print*, 'Pinhole u2', pinhole%u2
       print*, 'Pinhole u3', pinhole%u3
+      print*, 'Pinhole e1', pinhole%e1
+      print*, 'Pinhole e2', pinhole%e2
+      print*, 'Pinhole e3', pinhole%e3
       print*, 'Pinhole d1', pinhole%d1
       print*, 'Pinhole d2', pinhole%d2
       print*, 'Scintillator reference point', ps
