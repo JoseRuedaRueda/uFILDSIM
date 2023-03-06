@@ -12,8 +12,8 @@
 ! MODULE        : Main Core
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 21/05/2022
-!> \version 2.0
+!> \date 20/12/2022
+!> \version 4.0
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -39,116 +39,12 @@ program sinpa
   ! When the program it's called, the configuration file is passed as and input
   ! First of all we recovered the name of the configuration file
   call getarg(1, input_filename)
-
-  ! Open and read the configuration namelist.
-  open(unit=60, file=trim(input_filename), form='formatted', iostat=ierr)
-  read(60, NML=config, iostat=ierr)
-  close(60)
-
-  if (ierr /= 0) THEN
-    print*,'Error when reading the input filename: ',input_filename
-    print*,'Error in NAMELIST config: ',ierr
-    stop
-  end if
-  ! Open and read the input_namelist. Even if all namelist are in the same file
-  ! we open and close the namelist file each time because the python routine
-  ! which generate the namelist can write the different namelist in different
-  ! order in the file.
-  ! Allocate the gyroradius and pitch arrays to be readed
-  allocate (rl(nGyroradius))
-  allocate (XI(nxi))
-  allocate (XI_input(nxi))
-  ! Read the input namelist
-  open (unit=60, file=input_filename, form='formatted', iostat=ierr)
-  read(60, NML=inputParams, iostat = ierr)
-  close(60)
-  ! Sort the arrays
-  call quicksort_nr(XI)
-  call quicksort_nr(rl)
-  ! Read the specifict namelist depending on the diagnostic
-  if (FILDSIMmode.eqv..False.) then
-    open (unit=60, file=input_filename, form='formatted', iostat=ierr)
-    read(60, NML=nbi_namelist, iostat = ierr)
-    close(60)
-    nbi%u = u
-    if (abs(norm2(u) - 1.0d0) .gt. 0.01) then
-      stop 'NBI director vector is not well defined (not unitary)'
-    endif
-    nbi%p0 = p0
-    ! Markers interaction (energy loss, tramisssion and scattering) parameters
-    if (FoilElossModel .eq. 1) then
-      allocate(FoilElossParameters(2))
-      if (verbose) then
-        print*,'Empirical energy loss will be applied'
-      endif
-    elseif (FoilElossModel .eq. 2) then
-      allocate(FoilElossParameters(3))
-      if (verbose) then
-        print*,'SRIM energy loss will be applied'
-      endif    
-    elseif (FoilElossModel .eq. 3) then
-      allocate(FoilElossParameters(3))
-      if (verbose) then
-        print*,'Linear energy loss will be applied'
-      endif
-    elseif (FoilElossModel .eq. 4) then
-      allocate(FoilElossParameters(3))
-      if (verbose) then
-        print*,'AUG-Fit energy loss will be applied'
-      endif
-    elseif (FoilElossModel .eq. 0) then
-      if (verbose) then
-        print*,'No model will be applied for carbon foil energy loss'
-      endif
-    else
-      stop 'Interaction model not understood'
-    endif
-    if (ScintillatorYieldModel .eq. 1) then
-      allocate(ScintillatorYieldParameters(1))
-      if (verbose) then
-        print*,'Just proportionality factor will be applied'
-      endif
-    elseif (ScintillatorYieldModel .eq. 2) then
-      allocate(ScintillatorYieldParameters(2))
-      if (verbose) then
-        print*,'Birk model will be assumed'
-      endif
-    elseif (ScintillatorYieldModel .eq. 0) then
-      if (verbose) then
-        print*,'No model will be applied for scintillator efficiency'
-      endif
-    else
-      stop 'Yield model not understood'
-    endif
-    if (FoilYieldModel .eq. 1) then
-      allocate(FoilYieldParameters(1))
-      if (verbose) then
-        print*,'Just proportionality factor will be applied for foil transmission'
-      endif
-    elseif (FoilYieldModel .eq. 2) then
-      allocate(FoilYieldParameters(4))
-      if (verbose) then
-        print*,'Empirical ionization yield applied'
-      endif
-    elseif (FoilYieldModel .eq. 0) then
-      if (verbose) then
-        print*,'No model will be applied for foil yield'
-      endif
-    else
-      stop 'Yield model not understood'
-    endif
-    if ((FoilElossModel .ne. 0) .or. (FoilYieldModel .ne. 0) .or. (ScintillatorYieldModel .ne. 0))then
-      open (unit=60, file=input_filename, form='formatted', iostat=ierr)
-      read(60, NML=markerinteractions, iostat=ierr)
-      close(60)
-    endif
-
-  end if
-
+  ! --- Read the namelist inputs
+  call readNamelist(input_filename)
   if (verbose) then
     print*,'------------------------------------------------------------------'
     print*,'Input parameters read from: ',trim(input_filename)
-    print*, 'runid:', runID
+    print*,'runid:', runID
     print*,'------------------------------------------------------------------'
   endif
   ! --- Set the geometry
@@ -171,24 +67,12 @@ program sinpa
     print*, 'Mod: ', BpinholeMod
     print*, '-----------------------------------------------------------------'
   endif
-
-  ! --- Translate from FILDSIM pitch criteria to decent one
-  XI_input = XI
-  if (FILDSIMmode) then
-    ! Keep the crazy FILDSIM criteria
-    XI = dble(IpBt) * cos(XI_input*pi/180.0d0)
-  endif
   ! --- Caclualte the beta (gyrophases) for all X values
   if (minAngle .le. 0.0d0) then
     minAngle = minAngle + 2.0d0*pi
   endif
   call calculate_betas(restrict_mode)
-  ! --- Stablish the sign of the dt
-  if (backtrace) then
-    time_sign = -1.0d0
-  else
-    time_sign = 1.0d0
-  endif
+
   !-----------------------------------------------------------------------------
   !=============================================================================
   ! ROUND 2: MAPPING
