@@ -19,14 +19,16 @@
 ! Notes:
 !  - File units:
 !       - 60: Temporal files: Inputs/output. Open, read(write) and close it
+! TODO:
+!  - Check the restrict mode for INPA
 module sinpa_module
 
   implicit none
   !----------------------------------------------------------------------------
   ! PARAMETERS
   !----------------------------------------------------------------------------
-  integer, parameter:: versionID1 = 2  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 2  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID1 = 4  !< ID version number, to identify ouput
+  integer, parameter:: versionID2 = 0  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
@@ -54,10 +56,11 @@ module sinpa_module
       real (8), dimension(:,:), allocatable:: position !< Particle position in cm
       real (8), dimension(:,:), allocatable:: velocity !< Particle velocity in cm/s
       real (8):: energy0 !< particle energy at the entrance (keV)
-      real (8):: weight  !< Weight of the markers, [part/s/cm^2 of pinhole, for FIDASIM, in au, for mapping]
+      real (8):: weight  !< Weight of the markers, [part/s of pinhole, for FIDASIM, in au, for mapping]
       real (8):: type    !< Marker type: identify if is active or passive, follows FIDASIM criteria
       logical :: collision = .FALSE. !< Flag for the collision
-      real (8), dimension(3) :: collision_point !< Point of collision in cm
+      real (8), dimension(3) :: collision_point !< Point of collision in m
+      real (8), dimension(3) :: ionization_point !< Point of ionization in m
       real (8):: qm !< q over m, SI
       ! For the mapping
       real (8):: xi  !< xi angle (or pitch for FILD), radians
@@ -67,6 +70,7 @@ module sinpa_module
       real (8):: dt !< dt for the integration [s]
       integer::kindOfCollision ! With whom has collide
       real (8):: cosalpha_foil ! cos alpha inpinging in the INPA foil
+
   end type marker
 
   ! ABSTRACT CLASS FOR THE FIELDS
@@ -98,14 +102,6 @@ module sinpa_module
   !   real(8):: depth
   ! end type scatteringData
   !
-  !
-  ! type :: sigma_optics
-  !   ! Sigma for the model of optical resolution
-  !   integer :: no                 ! Number of points
-  !   real(8),dimension(3):: optical_axis ! Position of the optical axis
-  !   real(8):: delta       !
-  !   real(8), dimension(:), allocatable :: dist,so
-  ! end type sigma_optics
 
   ! ABSTRACT CLASS FOR THE NBI
   ! >/briefg NBI geometry
@@ -120,7 +116,7 @@ module sinpa_module
     ! real(8), dimension(:), allocatable :: Phipoints !< Phi coordinate of the points
   end type NBI_class
 
-
+  ! ABSTRACT CLASS FOR THE NBI
   !> \brief Contains the data of 1D direction in a compact type.
   type:: grid_class
     real(8), allocatable::data(:)   !< Contains the points of the grid.
@@ -130,6 +126,7 @@ module sinpa_module
     real(8)::dx                     !< Difference between consecutive points.
   end type grid_class
 
+  ! ABSTRACT CLASS FOR THE Pinhole reference system
   !> \brief Contains the reference system in the pinhole
   type :: pinhole_system_type
     integer:: kind  !< kind of pinhole (circle, 0) (rectangle, 1)
@@ -150,19 +147,35 @@ module sinpa_module
   ! Interfaces
   ! ---------------------------------------------------------------------------
   abstract interface
+    ! Pointer for the field interpolator
     subroutine interpolateField_interface(rq, zq, phiq, tq, out)
       implicit none
       real(kind=8), intent(in)::rq, zq, phiq, tq! Query points in all directions.
       real(kind=8), intent(out)::out(6) ! Br, Bz, Bphi
     end subroutine interpolateField_interface
+    ! pointer for the coordinate transform
     subroutine coordinatesTransform(cart, pol)
       implicit none
-      real(kind=8), intent(in)::cart(3)! input coordinates
+      real(kind=8), intent(in)::cart(3) ! input coordinates
       real(kind=8), intent(out)::pol(3) ! Output Coordinates
     end subroutine coordinatesTransform
+    ! pointer for the data storage
+    subroutine savePartToStrikeMatrix(particle, k)
+      import marker
+      type(marker), intent(in)::particle ! marker to be saved
+      integer, intent(in)::k     ! place to be storaged in the matrix
+    end subroutine savePartToStrikeMatrix
+    subroutine savePartToStrikeMatrixSignal(particle, k)
+      import marker
+      type(marker), intent(in)::particle ! marker to be saved
+      integer, intent(in)::k     ! place to be storaged in the matrix
+    end subroutine savePartToStrikeMatrixSignal
   end interface
   procedure(interpolateField_interface),pointer, public::getField
   procedure(coordinatesTransform),pointer, public::cart2pol
+  procedure(savePartToStrikeMatrix),pointer, public::savePartToStrike
+  procedure(savePartToStrikeMatrixSignal),pointer, public::savePartToStrikeSignal
+  
   ! -------------------------------------------------------------------------
   ! Variables
   ! -------------------------------------------------------------------------
@@ -170,7 +183,7 @@ module sinpa_module
   type(NBI_class) :: nbi
   real(8), dimension(:, :), allocatable:: closestPoints    !< closer points to NBI
   real(8), dimension(:), allocatable:: dPoints    !< distance to NBI
-  type(marker) :: part, backPart
+  type(marker) :: part, backPart, tempPart
   real(8) :: dt !< dt for the time integration, in s
   real(8) :: dt1
   real(8) :: OmegaPart !< Gyrofrequency of mapping particles
@@ -206,7 +219,7 @@ module sinpa_module
   character (len=1000) :: ScintillatorFile !< Scintillator file
   character (len=1000) :: input_filename !< Scintillator file
   character (len=1000) :: runFolder !< root directory of SINPA
-  character (len=1000) :: FIDASIMfolder !< root directory of SINPA
+  character (len=1000) :: FIDASIMfolder = ''!< root directory of SINPA
 
   ! --- Counters
   integer:: cCollimator !< Number of markers impinging the collimator
@@ -215,6 +228,8 @@ module sinpa_module
   integer:: cWrongIons !< Number of markers not colliding with the scintillator
   integer:: cWrong !< Number of ions not colliding with anything
   integer:: cInpingBack !< Number of ions colliding in the back part of the plate
+  integer:: cSelfshadowed !< Number of markers shadowed
+
   integer:: cScintillator !< Number of markers colliding with the scintillator, for each alpha
   integer:: cFoil !< Number of markers colliding with the foil, for each alpha
   integer:: cOrb = 0!< Number of saved orbits
@@ -279,6 +294,7 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
+  integer:: kindOfstrikeScintFile = 1 !< Kind of output strike file
   logical:: save_self_shadowing_collimator_strike_points = .false. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
@@ -293,7 +309,8 @@ module sinpa_module
     signal, resampling, nResampling, saveOrbits, saveRatio,saveOrbitLongMode, runFolder,&
     FIDASIMfolder, verbose, M, Zin, Zout, IpBt, flag_efield_on, save_collimator_strike_points,&
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
-    save_wrong_markers_position, save_scintillator_strike_points, self_shadowing, &
+    save_wrong_markers_position, save_scintillator_strike_points, &
+    kindOfstrikeScintFile, self_shadowing, &
     save_self_shadowing_collimator_strike_points
 
   ! --- Input
@@ -536,13 +553,14 @@ contains
     cart(3) = polar(2)
   end subroutine pol2cart
 
-  ! -----------------------------------------------------------------
-  ! POLAR TO CARTESIAN COORDINATES (COVARIANT VERSION)
-  !> \brief Covariant transformation from polar coordinates to cartesian coordinates
-  !! (i.e. velocities).
-  ! Created by Pablo Oyola
-  ! -----------------------------------------------------------------
+
   subroutine pol2cart_cov(vpol, vcart, r0)
+    ! -----------------------------------------------------------------
+    ! POLAR TO CARTESIAN COORDINATES (COVARIANT VERSION)
+    !> \brief Covariant transformation from polar coordinates to cartesian coordinates
+    !! (i.e. velocities).
+    ! Created by Pablo Oyola
+    ! -----------------------------------------------------------------
     implicit none
 
     real(8), intent(out)::vcart(3)  !< Cartesian components (Ax, Ay, Az)
@@ -555,16 +573,17 @@ contains
   end subroutine pol2cart_cov
 
 ! -----------------------------------------------------------------
-  ! QUICK sort of an array
-  !> \brief Quick sort of array (for 1D array)
-  ! Taken from https://www.mjr19.org.uk/IT/sorts/
-  ! -----------------------------------------------------------------
-  ! This version maintains its own stack, to avoid needing to call
-  ! itself recursively. By always pushing the larger "half" to the
-  ! stack, and moving directly to calculate the smaller "half",
-  ! it can guarantee that the stack needs no more than log_2(N)
-  ! entries
+
   subroutine quicksort_nr(array)
+    ! QUICK sort of an array
+    !> \brief Quick sort of array (for 1D array)
+    ! Taken from https://www.mjr19.org.uk/IT/sorts/
+    ! -----------------------------------------------------------------
+    ! This version maintains its own stack, to avoid needing to call
+    ! itself recursively. By always pushing the larger "half" to the
+    ! stack, and moving directly to calculate the smaller "half",
+    ! it can guarantee that the stack needs no more than log_2(N)
+    ! entries
     implicit none
     real(8), intent(inout)::array(:)
     real(8) :: temp,pivot
@@ -650,46 +669,11 @@ contains
 
     enddo
   end subroutine quicksort_nr
+
+
 !-------------------------------------------------------------------------------
 ! SECTION 2: NBI
 !-------------------------------------------------------------------------------
-  ! subroutine initNBI(filename, nbi)
-  !   ! ------------------------------------------------------------------
-  !   ! Initialise the NBI object
-  !   !> \brief Initialise the NBI object
-  !   !> \detail Load data from the NBI file and create the series of points
-  !   ! along the NBI line to be latter used for mapping
-  !   !
-  !   ! Written Jose Rueda Rueda
-  !   ! ------------------------------------------------------------------
-  !   ! ----
-  !   ! INPUTS:
-  !   character (len=*), intent(in):: filename  !< file with NBI data
-  !   ! Outputs:
-  !   type(NBI_class), intent(out):: nbi   !< NBI object
-  !   ! Local variables
-  !   integer :: ii
-  !   ! ---
-  !
-  !   ! Open the file and read:
-  !   open(60, file=filename, form = 'formatted', status='old', action='read')
-  !   read(60, NML=nbi_namelist)
-  !   close(60)
-  !   nbi%p0 = p0
-  !   nbi%u = u
-  !   nbi%npoints = npoints
-  !   nbi%d = d
-  !
-  !   ! calculate the points along the line
-  !   allocate(nbi%points(3, npoints))
-  !   allocate(nbi%Rpoints(npoints))
-  !   do ii = 1,npoints
-  !     nbi%points(:, ii) = p0 + ii * u
-  !     nbi%rpoints(ii) = sqrt(nbi%points(1, ii)**2 + nbi%points(2, ii)**2)
-  !     nbi%phipoints(ii) = atan2(nbi%points(2, ii), nbi%points(1, ii))
-  !   end do
-  ! end subroutine initNBI
-
   subroutine minimumDistanceLines(p, v, r, w, d_local, point)
     ! -------------------------------------------------------------------------
     ! Get the minimum distance between two lines
@@ -722,6 +706,8 @@ contains
     d_local = sqrt(d0(1)**2 + d0(2)**2 + d0(3)**2)
     point = p + (beta - gamma * alpha)/(gamma**2-1)*v
   end subroutine minimumDistanceLines
+
+
 !------------------------------------------------------------------------------
 ! SECTION 3: COEFFICIENTS FOR INTERPOLATORS
 !------------------------------------------------------------------------------
@@ -766,13 +752,14 @@ contains
     idx(4) = ja1
   end subroutine interpolate2D_coefficients
 
-  ! -----------------------------------------------------------------------
-  ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
-  !> \brief Computes, for a three given type(base), the nearest neighbours and the
-  !! normalized distance to all of them (normalized to the interval size in each direction).
-  !> \detail These values are used for interpolation in 3D.
-  ! -----------------------------------------------------------------------
+
   subroutine interpolate3D_coefficients(x1, x2, x3, x1q, x2q, x3q, aaa, idx)
+    ! -----------------------------------------------------------------------
+    ! OBTAIN THE NEAREST-NEIGHBOURS COEFFICIENTS FOR 3D INTERPOLATION
+    !> \brief Computes, for a three given type(base), the nearest neighbours and the
+    !! normalized distance to all of them (normalized to the interval size in each direction).
+    !> \detail These values are used for interpolation in 3D.
+    ! -----------------------------------------------------------------------
    implicit none
 
    class(grid_class), intent(in)::x1 !< Grid class for each direction.
@@ -816,7 +803,7 @@ contains
    idx(4) = ja1
    idx(5) = ka
    idx(6) = ka1
- end subroutine interpolate3D_coefficients
+  end subroutine interpolate3D_coefficients
 
 
 !------------------------------------------------------------------------------
@@ -1164,7 +1151,7 @@ contains
     ! Get the magnetic field in the pinhole
     ! call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field_in_cyl)
     ! call pol2cart_cov((/field_in_cyl(1),field_in_cyl(3), field_in_cyl(2) /), Bpinhole, rPinCyl)
-    call getField(rPinCyl(1), rPinCyl(3), rPinCyl(2), 0.5d0,  field)
+    call getField(rPinCyl(1), rPinCyl(2), rPinCyl(3), 0.5d0,  field)
     Bpinhole = field(1:3)
     BpinholeMod = sqrt(Bpinhole(1)**2 + Bpinhole(2)**2 + Bpinhole(3)**2)
     ! calculate the normal vectors
@@ -1174,6 +1161,7 @@ contains
     ! See handwritten SINPA notes for full explanation with 3D drawings
     if (e1mod.lt.0.001) then ! B is in line with u2
       print*, Bpinhole
+      print*, pinhole%u3
       print*, 'B field normal to the pinhole. Option not considered'
       print*, 'Write to jrrueda@us.es'
       stop
@@ -1187,6 +1175,7 @@ contains
                        + pinhole%e3(2)*pinhole%u3(2) &
                        + pinhole%e3(3)*pinhole%u3(3))
   end subroutine Bsystem
+
 
 !-------------------------------------------------------------------------------
 ! SECTION 5: COLLISION CHECK and INTEGRATOR
@@ -1411,6 +1400,7 @@ contains
     r1 = r_plus_half + 0.50d0*v1*dt
   end subroutine pushParticle
 
+
 !-------------------------------------------------------------------------------
 ! SECTION 6: PLATE SETUP
 !-------------------------------------------------------------------------------
@@ -1534,7 +1524,6 @@ contains
     read(60, NML=ExtraGeometryParams, iostat=ierr)
     close(60)
 
-
     ! read the plates
     allocate(geometry(n))
     do i = 1,n
@@ -1576,11 +1565,15 @@ contains
       print*, 'Pinhole u1', pinhole%u1
       print*, 'Pinhole u2', pinhole%u2
       print*, 'Pinhole u3', pinhole%u3
+      ! print*, 'Pinhole e1', pinhole%e1
+      ! print*, 'Pinhole e2', pinhole%e2
+      ! print*, 'Pinhole e3', pinhole%e3
       print*, 'Pinhole d1', pinhole%d1
       print*, 'Pinhole d2', pinhole%d2
       print*, 'Scintillator reference point', ps
     endif
   end subroutine readGeometry
+
 
 !------------------------------------------------------------------------------
 ! SECTION 7: FIDASIM compatibility
@@ -1626,7 +1619,7 @@ contains
     read(60) dummy2D
     F4Markers%v = transpose(dble(dummy2D)) / 100.0d0
     read(60) dummy1D
-    F4Markers%wght = dble(dummy1D) * pinhole%d1**2 * pi
+    F4Markers%wght = dble(dummy1D) !* pinhole%d1**2 * pi
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
     if (verbose) then
@@ -1634,9 +1627,10 @@ contains
     endif
   end subroutine readFIDASIM4Markers
 
- !------------------------------------------------------------------------------
- ! SECTION 8: Initialization of markers
- !------------------------------------------------------------------------------
+
+!------------------------------------------------------------------------------
+! SECTION 8: Initialization of markers
+!------------------------------------------------------------------------------
  subroutine initMarker(vmod, dt_initial, xxi, beta_min, dbeta, rli)
    ! -----------------------------------------------------------------------
    ! Initialise the marker
@@ -1752,7 +1746,7 @@ contains
              if (dum_beta .ge. 0.0d0) then
                print*, XI_input(jj)
                print*, dum_beta
-               print*, 'Option not implemented, contat jrrueda@us.es '
+               print*, 'Option not implemented, contact jrrueda@us.es '
                stop
              else
                min_beta(jj) = max(pi + abs(dum_beta), minAngle)
@@ -1772,9 +1766,10 @@ contains
    endif
  end subroutine calculate_betas
 
- !-----------------------------------------------------------------------------
- ! SECTION 9: Saving
- !-----------------------------------------------------------------------------
+
+!-----------------------------------------------------------------------------
+! SECTION 9: Saving
+!-----------------------------------------------------------------------------
  subroutine saveOrbit(fid, marker_to_save, step_to_save, long_flag)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1804,9 +1799,138 @@ contains
    endif
  end subroutine saveOrbit
 
- !-----------------------------------------------------------------------------
- ! SECTION 10: Foil interaction
- !-----------------------------------------------------------------------------
+ subroutine writeStrikeFileHeader(filename, fid, kindOfFile, flag, nCol)
+   ! -----------------------------------------------------------------------
+   ! Open the strike file and prepare the strike size
+   !> \brief Save the orbit into the binary file
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - fid: FID of the file where to write (it should be open already)
+   !  - marker to save: marker to be saved
+   !  - step_to_save: Maximum step to be saved in the trajectory
+   !  - long_flag: if true to so called 'long' format will be used
+   ! -----------------------------------------------------------------------
+   !Dummy variables
+   character(*), intent(in) :: filename
+   integer, intent(in) :: fid
+   integer, intent(in) :: kindOfFile
+   logical, intent(in) :: flag
+   integer, intent(out) :: nCol
+
+   if (FILDSIMmode.and.(kindOfFile.eq.1))then
+    nCol = 12
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeFILD1
+   elseif (FILDSIMmode.and.(kindOfFile.eq.2)) then
+    nCol = 14
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeFILD2
+   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.1)) then
+    nCol = 19
+    ! Set the pointers to the store functions
+    savePartToStrike => savePartToStrikeINPA1
+   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.101)) then
+      nCol = 22
+      ! Set the pointers to the store functions
+      savePartToStrikeSignal => savePartToStrikeINPASignal1
+   endif
+
+   if (flag .and. (kindOfFile.lt.101)) then
+    open(unit=fid, file=trim(filename), access = 'stream', action='write', status='replace')
+    write(fid) versionID1, versionID2, runID, nGyroradius, rL, nxi, XI_input, transfer(FILDSIMmode, 1), nCol, kindOfFile
+   elseif (flag .and. (kindOfFile.gt.100)) then 
+    open(unit=fid, file=trim(filename), access = 'stream', action='write', status='replace')
+    write(fid) versionID1, versionID2, runID, 1, 0.0d0, 1, 0.0d0, transfer(FILDSIMmode, 1), nCol, kindOfFile
+   endif
+
+  
+
+
+ end subroutine writeStrikeFileHeader
+
+ subroutine savePartToStrikeFILD1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+ end subroutine savePartToStrikeFILD1
+
+ subroutine savePartToStrikeFILD2(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  real(8) :: v1, v2, v3, rparticle(3), dummy34(6)
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+  v1 = sum(pinhole%e1*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
+  v2 = sum(pinhole%e2*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
+  v3 = sum(pinhole%e3*part%velocity(:, istep))&
+    /norm2(part%velocity(:, istep))
+  Strike(13, cScintillator) = v1
+  Strike(14, cScintillator) = v2
+  call cart2pol(part%position(:, istep), rparticle)
+  call getField(rparticle(1), rparticle(2), rparticle(3), 0.0d0, dummy34)
+  write(114,'(6F14.6)') v1, v2, v3, dummy34(1:3)
+
+ end subroutine savePartToStrikeFILD2
+
+ subroutine savePartToStrikeINPA1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1:3, cScintillator ) = part%collision_point ! f point
+  Strike(4, cScintillator) = part%weight ! weight
+  Strike(5, cScintillator) = part%beta ! Beta angle
+  Strike(6:8, cScintillator) = part%position(:, 1) ! i pos
+  Strike(9:11, cScintillator ) = &
+    MATMUL(rotation, part%collision_point - ps) ! f pos scint
+  Strike(12, cScintillator) = &
+    180/pi*acos(incidentProjection) ! incident angle
+  call minimumDistanceLines(part%position(:, 1), &
+    part%velocity(:, 1)/v0, nbi%p0,&
+    nbi%u, dMin, posMin)
+  Strike(13:15,cScintillator) = posMin   ! Initial point (NBI)
+  Strike(16:18,cScintillator) = part%velocity(:, 1)  ! Initial velocity
+  Strike(19, cScintillator) = dMin ! Closer distance to NBI
+ end subroutine savePartToStrikeINPA1
+
+ subroutine savePartToStrikeINPASignal1(particle, counter)
+  ! Dummy variables
+  type(marker), intent(in):: particle
+  integer, intent(in) :: counter
+  Strike(1, cScintillator ) = dble(i) ! FIDASIM marker id
+  Strike(2:4, cScintillator ) = part%collision_point ! f point
+  Strike(5:7, cScintillator ) = &
+     MATMUL(rotation, part%collision_point - ps) !f point in scintillator region
+  Strike(8:10, cScintillator) = F4Markers%ipos(:, i) ! CX position
+  Strike(11:13,cScintillator) = part%velocity(:, 1)   ! Initial velocity
+  Strike(14,cScintillator) = part%weight ! weight
+  Strike(15, cScintillator) = F4Markers%kind(i) ! Kind of signal
+  Strike(16, cScintillator) = part%energy0 ! energy at entrance
+  Strike(17, cScintillator) = 0.5*sum(part%velocity(:, istep)**2)*M/qe*amu_to_kg/1000.0
+  Strike(18, cScintillator) = part%cosalpha_foil
+  Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
+  Strike(20:22, cScintillator) = part%ionization_point 
+ end subroutine savePartToStrikeINPASignal1
+!-----------------------------------------------------------------------------
+! SECTION 10: Foil interaction
+!-----------------------------------------------------------------------------
  subroutine foilInteraction(MC_marker, normal, step)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1834,7 +1958,7 @@ contains
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1)
    elseif (FoilYieldModel.eq.2) then
      ! estimate the ionization efficiency
-     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) *MC_marker%energy0 / M)
+     yield = FoilYieldParameters(2) - FoilYieldParameters(3) * exp(-FoilYieldParameters(4) * MC_marker%energy0 / M)
      ! Scale the weight
      MC_marker%weight = MC_marker%weight * FoilYieldParameters(1) * yield
    endif
@@ -1867,13 +1991,48 @@ contains
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
      ! Save the cosalpha value
      MC_marker%cosalpha_foil = cos_alpha
+   elseif (FoilElossModel.eq.4) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     if (Energy-FoilElossParameters(3).gt.0.0) then
+      deltaE = - FoilElossParameters(1)/cos_alpha * &
+        (FoilElossParameters(2) * sqrt(Energy-FoilElossParameters(3)))
+     else
+      deltaE = 0.0
+     endif
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
+    elseif (FoilElossModel.eq.3) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilElossParameters(1)/cos_alpha * &
+      (FoilElossParameters(2) * Energy + FoilElossParameters(3))
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha
    endif
 
  end subroutine foilInteraction
 
- !-----------------------------------------------------------------------------
- ! SECTION 11: Yield modelling
- !-----------------------------------------------------------------------------
+
+!-----------------------------------------------------------------------------
+! SECTION 11: Yield modelling
+!-----------------------------------------------------------------------------
  subroutine yieldScintillator(MC_marker, step)
    ! -----------------------------------------------------------------------
    ! Save the orbit
@@ -1903,4 +2062,136 @@ contains
      MC_marker%weight = MC_marker%weight * ScintillatorYieldParameters(1) * (Energy ** ScintillatorYieldParameters(2))
    endif
  end subroutine yieldScintillator
+
+! ----------------------------------------------------------------------------
+! SECTION 12: SINPA flow
+! ----------------------------------------------------------------------------
+ subroutine readNamelist(dumFilename)
+   ! -----------------------------------------------------------------------
+   ! Read the namelist
+   !> \brief Read the namelist
+   ! Written by Jose Rueda
+   !
+   ! INPUTS:
+   !  - dumFilename: name of the filename to be read
+   ! -----------------------------------------------------------------------
+   ! Dummy inputs
+  character(len=*), intent(in)::dumFilename   !< Filename with namelist.
+  ! Open and read the configuration namelist.
+  open(unit=60, file=trim(dumFilename), form='formatted', iostat=ierr)
+  read(60, NML=config, iostat=ierr)
+  close(60)
+  if (ierr /= 0) THEN
+    print*,'Error when reading the input filename: ',dumFilename
+    print*,'Error in NAMELIST config: ',ierr
+    stop
+  end if
+  ! Open and read the input_namelist. Even if all namelist are in the same file
+  ! we open and close the namelist file each time because the python routine
+  ! which generate the namelist can write the different namelist in different
+  ! order in the file.
+  ! Allocate the gyroradius and pitch arrays to be readed
+  allocate (rl(nGyroradius))
+  allocate (XI(nxi))
+  allocate (XI_input(nxi))
+  ! Read the input namelist
+  open (unit=60, file=dumFilename, form='formatted', iostat=ierr)
+  read(60, NML=inputParams, iostat = ierr)
+  close(60)
+  ! Sort the arrays
+  call quicksort_nr(XI)
+  call quicksort_nr(rl)
+  ! Read the specifict namelist depending on the diagnostic
+  if (FILDSIMmode.eqv..False.) then
+    open (unit=60, file=dumFilename, form='formatted', iostat=ierr)
+    read(60, NML=nbi_namelist, iostat = ierr)
+    close(60)
+    nbi%u = u
+    if (abs(norm2(u) - 1.0d0) .gt. 0.01) then
+      stop 'NBI director vector is not well defined (not unitary)'
+    endif
+    nbi%p0 = p0
+    ! Markers interaction (energy loss, tramisssion and scattering) parameters
+    if (FoilElossModel .eq. 1) then
+      allocate(FoilElossParameters(2))
+      if (verbose) then
+        print*,'Empirical energy loss will be applied'
+      endif
+    elseif (FoilElossModel .eq. 2) then
+      allocate(FoilElossParameters(3))
+      if (verbose) then
+        print*,'SRIM energy loss will be applied'
+      endif    
+    elseif (FoilElossModel .eq. 3) then
+      allocate(FoilElossParameters(3))
+      if (verbose) then
+        print*,'Linear energy loss will be applied'
+      endif
+    elseif (FoilElossModel .eq. 4) then
+      allocate(FoilElossParameters(3))
+      if (verbose) then
+        print*,'AUG-Fit energy loss will be applied'
+      endif
+    elseif (FoilElossModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for carbon foil energy loss'
+      endif
+    else
+      stop 'Interaction model not understood'
+    endif
+    if (ScintillatorYieldModel .eq. 1) then
+      allocate(ScintillatorYieldParameters(1))
+      if (verbose) then
+        print*,'Just proportionality factor will be applied'
+      endif
+    elseif (ScintillatorYieldModel .eq. 2) then
+      allocate(ScintillatorYieldParameters(2))
+      if (verbose) then
+        print*,'Birk model will be assumed'
+      endif
+    elseif (ScintillatorYieldModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for scintillator efficiency'
+      endif
+    else
+      stop 'Yield model not understood'
+    endif
+    if (FoilYieldModel .eq. 1) then
+      allocate(FoilYieldParameters(1))
+      if (verbose) then
+        print*,'Just proportionality factor will be applied for foil transmission'
+      endif
+    elseif (FoilYieldModel .eq. 2) then
+      allocate(FoilYieldParameters(4))
+      if (verbose) then
+        print*,'Empirical ionization yield applied'
+      endif
+    elseif (FoilYieldModel .eq. 0) then
+      if (verbose) then
+        print*,'No model will be applied for foil yield'
+      endif
+    else
+      stop 'Yield model not understood'
+    endif
+    if ((FoilElossModel .ne. 0) .or. (FoilYieldModel .ne. 0) .or. (ScintillatorYieldModel .ne. 0))then
+      open (unit=60, file=input_filename, form='formatted', iostat=ierr)
+      read(60, NML=markerinteractions, iostat=ierr)
+      close(60)
+    endif
+
+  end if
+  ! --- Translate from FILDSIM pitch criteria to decent one
+  XI_input = XI
+  if (FILDSIMmode) then
+    ! Keep the crazy FILDSIM criteria
+    XI = dble(IpBt) * cos(XI_input*pi/180.0d0)
+  endif
+  ! --- Stablish the sign of the dt
+  if (backtrace) then
+    time_sign = -1.0d0
+  else
+    time_sign = 1.0d0
+  endif
+
+ end subroutine readNamelist
 end module sinpa_module

@@ -30,7 +30,7 @@ debug: sinpa_mod sinpa_debug
 
 sinpa_mod:
 	cd $(SRC_DIR) && \
-	$(COMP) $(OPT) -c $(MODULES)
+	$(COMP) $(OPT) -c $(MODULES) 
 
 sinpa_mod_cluster:
 	cd $(SRC_DIR) && \
@@ -38,7 +38,7 @@ sinpa_mod_cluster:
 
 sinpa:
 	cd $(SRC_DIR) && \
-	$(COMP) $(OPT) $(MODULES:.f90=.o) $(TARGET) -o $(EXE)
+	$(COMP) $(OPT) $(MODULES:.f90=.o) $(TARGET) -o $(EXE) 
 
 	mv $(SRC_DIR)*.o $(BIN_DIR)
 	mv $(SRC_DIR)*.mod $(BIN_DIR)
