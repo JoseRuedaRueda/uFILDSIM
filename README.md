@@ -9,7 +9,7 @@ Up to now, these python libraries are distributed together with the Scintillator
 In other to compile the code, you should use the version of gfortran included in gcc version 9.3.0 (GCC) [This is the default when you do module load gcc in toki, as of 4/1/2021]. Notice that any GCC between 8 and 10 seems to work.
 There are 2 ways of compiling the code:
   - `make all`: It will compile the code in a way that is compatible with all processors, should work from your laptop to clusters
-  - `make all_cluster`: It will compile it with some optimization flags though for high performance CPU and clusters. Notice that these options are cluster dependent, for example this compiled version work in MPCDF cluster toks but not toki. Special compilation for other clusters could be added upon request.
+  - `make all_cluster`: It will compile it with some optimization flags though for high performance CPU and clusters. Notice that these options are cluster dependent, for example this compiled version work in MPCDF cluster toks but not toki. Special compilation for other clusters could be added upon request. (thos option does no longer work as it contained flags for the inter CPU, but toki was upgraded to AMD hardware)
 
 ### Test run
 SINPA comes with a test input configuration file. Once your code is compiled, go to the file `./runs/InitialTest/inputs/InitialTest.cfg` and change the variables indicated with a !@# in the comments (they are the ones pointing to speficit paths of your installation, runDir and GeomDir). Once that is done, open the terminal and type:
