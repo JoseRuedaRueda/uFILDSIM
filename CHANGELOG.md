@@ -1,3 +1,8 @@
+## 4.3 Eloss model
+- Updated model 4 such as if E1>E2, the marker with E1 has more energy than the one with E2 also after passing the foil
+## 4.2 FIDASIM in strument function
+- new flag weightCalculation added to config namelist, if true, the code will use the iposgc stored in the FIDASIM file.
+
 ## 4.1 FIDASIM weight
 - Area normalization not applied, int FIDASIM markers, as the pinhole size is different in FIDASIM than in SINPA to speed up the simulation
 ## 4.0 Torwards interfaces

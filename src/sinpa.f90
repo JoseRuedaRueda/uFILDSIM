@@ -12,8 +12,8 @@
 ! MODULE        : Main Core
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 20/12/2022
-!> \version 4.0
+!> \date 06/06/2023
+!> \version 4.2
 !> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
@@ -94,8 +94,8 @@ program sinpa
     call writeStrikeFileHeader(trim(runFolder)//'/results/'//trim(runID)//&
                                '.spmap', 61, kindOfstrikeScintFile, save_scintillator_strike_points,&
                                dummy_shape)
-    open(unit=114, file=trim(runFolder)//'/results/'&
-      //trim(runID)//'strikes.txt', action='write', form='formatted')
+    ! open(unit=114, file=trim(runFolder)//'/results/'&
+    !   //trim(runID)//'strikes.txt', action='write', form='formatted')
 
     ! -- Strike points on the collimator
     if (save_collimator_strike_points) then
@@ -438,7 +438,7 @@ program sinpa
     if (save_self_shadowing_collimator_strike_points) then
       close(65)
     endif
-    close(114)
+    ! close(114)
     !De-allocate
     deallocate(StrikeMap)
     deallocate(part%position)
