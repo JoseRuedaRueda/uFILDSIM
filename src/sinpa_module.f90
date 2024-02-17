@@ -6,9 +6,9 @@
 ! MODULE        : Auxiliar routines
 ! AFFILIATION   : University of Sevilla
 !> \author Jose Rueda - Universidad de Sevilla
-!> \date 21/05/2022
-!> \version 2.2
-!> \see https://gitlab.mpcdf.mpg.de/poyo/fosd
+!> \date 06/06/2023
+!> \version 4.2
+!> \see https://gitlab.mpcdf.mpg.de/ruejo/sinpa
 !
 ! DESCRIPTION:
 !> \brief Contains auxiliary routines for SINPA
@@ -28,7 +28,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 4  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 0  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
@@ -302,7 +302,7 @@ module sinpa_module
   integer:: ScintillatorYieldModel = 0
   integer:: FoilYieldModel = 0
   logical:: self_shadowing = .false.
-
+  logical:: WeightCalculation = .false.
   ! Namelist
   NAMELIST /config/ runID, GeomFolder, nxi, &
     nGyroradius, nMap, n1, r1, mapping, FILDSIMmode, &
@@ -311,7 +311,7 @@ module sinpa_module
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
     save_wrong_markers_position, save_scintillator_strike_points, &
     kindOfstrikeScintFile, self_shadowing, &
-    save_self_shadowing_collimator_strike_points
+    save_self_shadowing_collimator_strike_points, WeightCalculation
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -1622,6 +1622,11 @@ contains
     F4Markers%wght = dble(dummy1D) !* pinhole%d1**2 * pi
     read(60) dummy1D
     F4Markers%kind = int(dummy1D)
+    if (WeightCalculation) then
+      read(60) dummy2D
+      F4Markers%ipos = transpose(dble(dummy2D)) / 100.0d0
+      print*, 'Using gc position'
+    endif
     if (verbose) then
       print*, F4Markers%counter, '*', nResampling, 'markers to be followed'
     endif
@@ -1886,7 +1891,7 @@ contains
   Strike(14, cScintillator) = v2
   call cart2pol(part%position(:, istep), rparticle)
   call getField(rparticle(1), rparticle(2), rparticle(3), 0.0d0, dummy34)
-  write(114,'(6F14.6)') v1, v2, v3, dummy34(1:3)
+  ! write(114,'(6F14.6)') v1, v2, v3, dummy34(1:3)
 
  end subroutine savePartToStrikeFILD2
 
@@ -2000,11 +2005,32 @@ contains
      cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
      ! Scale the energy
      Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
-     if (Energy-FoilElossParameters(3).gt.0.0) then
+     if (Energy-FoilElossParameters(3)-(FoilElossParameters(1)/cos_alpha * (FoilElossParameters(2)))**2.gt.0.0) then
       deltaE = - FoilElossParameters(1)/cos_alpha * &
         (FoilElossParameters(2) * sqrt(Energy-FoilElossParameters(3)))
+     elseif (Energy-(FoilElossParameters(1)/cos_alpha * (FoilElossParameters(2)))**2.gt.0.0) then
+      deltaE = (FoilElossParameters(1)/cos_alpha * (FoilElossParameters(2)))**2
      else
-      deltaE = 0.0
+      deltaE=0
+     endif
+     ! Scale the velocity
+     MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
+     ! Save the cosalpha value
+     MC_marker%cosalpha_foil = cos_alpha   
+    elseif (FoilElossModel.eq.5) then
+     ! Scale the velocity
+     localV = MC_marker%velocity(:, step+1)
+     modV = sqrt(sum(localV**2))
+     localV = localV/modV
+     ! Get the incident angle (projection)
+     cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
+     ! Scale the energy
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     if (Energy-abs(FoilElossParameters(3)/FoilElossParameters(2)).gt.0.0) then
+      deltaE = - FoilElossParameters(1)/cos_alpha * &
+        (FoilElossParameters(2) * Energy + FoilElossParameters(3))
+     else
+      deltaE=0
      endif
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (Energy + deltaE)/(M/qe*amu_to_kg/1000.0))
@@ -2128,6 +2154,11 @@ contains
         print*,'Linear energy loss will be applied'
       endif
     elseif (FoilElossModel .eq. 4) then
+      allocate(FoilElossParameters(3))
+      if (verbose) then
+        print*,'AUG-Fit energy loss will be applied'
+      endif    
+    elseif (FoilElossModel .eq. 5) then
       allocate(FoilElossParameters(3))
       if (verbose) then
         print*,'AUG-Fit energy loss will be applied'
