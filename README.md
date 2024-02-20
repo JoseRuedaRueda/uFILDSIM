@@ -5,6 +5,24 @@ This code was created as a synthetic INPA, although it was enhanced to have FILD
 Up to now, these python libraries are distributed together with the ScintillatorSuite (<https://gitlab.mpcdf.mpg.de/ruejo/scintsuite>). They are now under development, as the code is kinda new. Once they are solid, a copy of those routines will be included here
 
 ## Installation and documentation
+### Cloning the code
+Just go to the parent folder and clone the code. Note: When developing it, this upgraded FILDSIM code was the Synthetic INPA (SINPA) code. This is how it is called in the ScintSutie code. So better cloned in a SINPA folder, to keep the old convention of naming.
+
+First, you need to say to git to do not record the file rights, as from the shares (IPP file system) to your personal laptop or the configuration in other machines, they can be different, so we can get fake file change right. Just open a terminal and write:
+```bash
+git config --global core.fileMode false
+git config core.fileMode false
+```
+
+After it, you can manually and easily clone the code:
+
+For AUG users: `<ParentFolderForSuite> = /shares/departments/AUG/users/$USER` (it can be changed if you want)
+```bash
+cd <ParentFolderForSuite>
+git clone https://github.com/JoseRuedaRueda/uFILDSIM SINPA
+cd SINPA
+git checkout <branch>
+```
 ### Compilation
 In other to compile the code, you should use the version of gfortran included in gcc version 9.3.0 (GCC) [This is the default when you do module load gcc in toki, as of 4/1/2021]. Notice that any GCC between 8 and 10 seems to work.
 There are 2 ways of compiling the code:
