@@ -1,8 +1,13 @@
-# SINPA code
+# FILDSIM code
 
 This code was created as a synthetic INPA, although it was enhanced to have FILDSIM capabilities. The code is written in fortran, although a complete set of python routines to prepare the inputs and process the output is written.
 
-Up to now, these python libraries are distributed together with the ScintillatorSuite (<https://gitlab.mpcdf.mpg.de/ruejo/scintsuite>). They are now under development, as the code is kinda new. Once they are solid, a copy of those routines will be included here
+Up to now, these python libraries are distributed together with the ScintillatorSuite (<https://github.com/JoseRuedaRueda/ScintSuite>). This ScintSuite will be open sourced soon
+
+## Citation of the code
+To cite the code please use the FILDSIM DOI (DOI 10.5281/zenodo.12512086) flus the FILDSIM or INPASIM article, depending if you are running the code for FILD or for INPA:
+- FILDSIM mode: J Galdon-Quiroga etal 2018 PlasmaPhys.Control.Fusion 60 105005
+- INPASIM mode: J Rueda-Rueda et al 2024 Plasma Phys. Control. Fusion 66 065025
 
 ## Installation and documentation
 ### Cloning the code
@@ -72,4 +77,4 @@ If a new implementation is required, open the appropriate issue in the GIT and l
 ## Useful links
 - FILDSIM code: <https://gitlab.mpcdf.mpg.de/jgq/FILDSIM.git>
 - i-HIBPSIM code: <https://gitlab.mpcdf.mpg.de/poyo/ihibpsim>
-- ScintillatorSuite library: <https://gitlab.mpcdf.mpg.de/ruejo/scintsuite>
+- ScintillatorSuite library: <https://github.com/JoseRuedaRueda/ScintSuite>
