@@ -128,9 +128,10 @@ program sinpa
     ! --- Allocate the particle:
     call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
-    dt = 2 * pi / OmegaPart / nGyro * time_sign
+    dt = 2 * pi / abs(OmegaPart) / nGyro * time_sign
     part%n_t = abs(int(maxT/dt))
     if (verbose) then
+      print*, dt, 'Original dt'
       print*, part%n_t, 'steps will be performed for each particle'
     endif
     allocate(part%position(3,part%n_t))
@@ -145,7 +146,7 @@ program sinpa
         part%dt = dt
         allocate(tempPart%position(3,tempPart%n_t))
         allocate(tempPart%velocity(3,tempPart%n_t))     
-    endif
+      endif
     
     endif
     Lenergies: do irl = 1, nGyroradius   ! Loop over energies (gyroradii)
@@ -153,11 +154,12 @@ program sinpa
       call rl2v0(rL(irl), M, Zout, BpinholeMod, v0)
 
       ! Set the dt to avoid doing unnnecesary steps for each markers
-      if (Zin .gt. 0.1) then  ! if we launched ions
+      if (abs(Zin) .gt. 0.1) then  ! if we launched ions
         dt1 = dt
       else
         dt1 = 0.04 / v0 * time_sign  ! if we launched neutrals
       endif
+      print*, 'dt1', dt1
       LXI: do iXI = 1, nxi  ! Loop over the alpha angles
         ! -- Initialise all the counters
         cScintillator = 0
@@ -400,9 +402,10 @@ program sinpa
       StrikeMap(2, :) = 180.0d0/pi*acos(StrikeMap(2, :)/dble(IpBt))
       write(60,'(9F14.6)') StrikeMap
     else
-      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a)') 'Gyroradius [cm]', &
-              'Alpha [rad]', 'X [m]', 'Y [m]', 'Z [m]', &
-              'X0 [m]','Y0[m]', 'Z0[m]','d0[m]','Collimator_Factor (%)', 'nMarkers'
+      write(60,'(a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a,2x,a, 2x,a 2x,a, 2x, a, 2x, a)') 'Gyroradius [cm]', &
+              'Alpha [rad]', 'X [m]', 'Y [m]', 'Z [m]', 'Beta avg[rad]', 'nMarkers', 'dummy',&
+              'Avg Inc angle', &
+              'X0 [m]','Y0[m]', 'Z0[m]','d0[m]' 
       ! Write the data
       write(60,'(13F14.6)') StrikeMap
     endif
@@ -496,7 +499,7 @@ program sinpa
     ! --- Allocate the particle:
     call cpu_time(t_initial_orbits)
     call omega(M, Zout, BpinholeMod, OmegaPart)  ! Gyrofrequency
-    dt = 2 * pi / OmegaPart / nGyro
+    dt = 2 * pi / abs(OmegaPart) / nGyro
     part%n_t = int(abs(maxT/dt))
     dt1 = 4.0E-7
     if (verbose) then
@@ -505,9 +508,10 @@ program sinpa
     allocate(part%position(3,part%n_t))
     allocate(part%velocity(3,part%n_t))
     ! --- Allocate the necesary matrix
-    allocate(Strike(dummy_shape,F4Markers%counter*nResampling))            ! Strike points in the scint
-    allocate(CollimatorStrikes(4,F4Markers%counter*nResampling))       ! Strike position on the coll
-    allocate(WrongMarkers(4,F4Markers%counter*nResampling))       ! Strike position on the coll
+    nResamplingAUX = int(max(dble(nResampling), 1.0))
+    allocate(Strike(dummy_shape,F4Markers%counter*nResamplingAUX))            ! Strike points in the scint
+    allocate(CollimatorStrikes(4,F4Markers%counter*nResamplingAUX))       ! Strike position on the coll
+    allocate(WrongMarkers(4,F4Markers%counter*nResamplingAUX))       ! Strike position on the coll
     CollimatorStrikes(:,:) = 0.0d0
     Strike(:,:) = 0.0d0
     WrongMarkers(:,:) = 0.0d0
@@ -518,13 +522,14 @@ program sinpa
     cWrongNeutral = 0
     cWrong = 0
     cFoil = 0
+    cInpingBack = 0
     ! --- Get the scale
     ! See the normalization factor for the weight
     normalization_resample = max(dble(nResampling), 1.0d0)
     markers: do i=1, F4Markers%counter
       ! - Common data for all resampled markers
       part%energy0 = 0.5*sum(F4Markers%v(:, i)**2)*M/qe*amu_to_kg/1000.0
-      resample: do j=1, nResampling
+      resample: do j=1, nResamplingAUX
         ! Initialise the markers
         ! - Clean the marker data
         part%position(:, :) = 0.0d0
@@ -533,17 +538,28 @@ program sinpa
         part%kindOfCollision = 9  ! Just initialise it to a dummy value
         part%weight = F4Markers%wght(i) / normalization_resample
         part%cosalpha_foil = 0.0d0
-
+        part%rl = 0.0
+        part%beta = 0.0
+        part%xi = 0.0
         ! - FIDASIM data
         part%velocity(:, 1) = F4Markers%v(:, i)
-        ! Resample the position (only valid for circular pinholes)
-        pos1 = pinhole%r + pinhole%d1*(20.0d0*pinhole%u1 + 20.0d0*pinhole%u2)
-        do while (sqrt(sum((pos1-pinhole%r)**2)) .gt.  pinhole%d1)
-          call random_number(ran)
-          pos1 = pinhole%r+ pinhole%d1*((-1+2*ran(2))*pinhole%u1+(-1+2*ran(3))*pinhole%u2)
-        end do
-        part%position(:, 1) = pos1
-
+        ! Resample the position:
+        if (nResampling > 0) then
+          ! Resample the position (only valid for circular pinholes)
+          if (pinhole%kind.eq.0) then
+            pos1 = pinhole%r + pinhole%d1*(20.0d0*pinhole%u1 + 20.0d0*pinhole%u2)
+            do while (sqrt(sum((pos1-pinhole%r)**2)) .gt.  pinhole%d1)
+              call random_number(ran)
+              pos1 = pinhole%r+ pinhole%d1*((-1+2*ran(2))*pinhole%u1+(-1+2*ran(3))*pinhole%u2)
+            end do
+          else
+            print*, 'Option not implemented'
+            stop
+          endif
+          part%position(:, 1) = pos1
+        else
+          part%position(:, 1) = F4Markers%fpos(:, i)
+        endif
         ! - dt and charge
         part%dt    = dt1
         part%qm    = Zin * qe / M /amu_to_kg
@@ -577,6 +593,7 @@ program sinpa
                 /norm2(part%velocity(:, istep))
               if (incidentProjection .gt. 0) then
                 ! neglect marker
+                cInpingBack = cInpingBack + 1
                 cycle resample
               endif
               call yieldScintillator(part, istep)
@@ -619,6 +636,15 @@ program sinpa
         cWrong = cWrong + 1
         WrongMarkers(1:3, cWrong) = part%position(:, istep)
         WrongMarkers(4, cWrong) = part%weight
+        ! If has collided with the foil, was a wrong ion
+        if (part%kindOfCollision .eq. 1) then
+          cWrongIons = cWrongIons + 1
+        elseif (part%kindOfCollision .eq. 9) then ! We are a wrong neutral
+          cWrongNeutral = cWrongNeutral + 1
+        else
+          print*, 'We should not be here, your particle has collided but not exit the loop???'
+        endif
+          
       enddo resample
     end do markers
     write(61) cScintillator, transpose(Strike(:, 1:cScintillator))
@@ -635,6 +661,7 @@ program sinpa
       print*, 'Not colliding Neutrals', cWrongNeutral
       print*, 'Not colliding Ions', cWrongIons
       print*, 'hitting foil', cFoil
+      print*, 'hitting the collimator in the back', cInpingBack
     endif
     ! ---- Write the extra information
     ! Write time and shot number of the simulation

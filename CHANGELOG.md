@@ -1,3 +1,7 @@
+## 4.4 Bug fix
+- Solved bugs when tracing particles with negative charge
+- Solved bug in verbosing colliding elements
+
 ## 4.3 Eloss model
 - Updated model 4 such as if E1>E2, the marker with E1 has more energy than the one with E2 also after passing the foil
 ## 4.2 FIDASIM in strument function
