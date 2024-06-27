@@ -258,6 +258,7 @@ module sinpa_module
   integer:: dummy_shape !< to get the size of the strike object
   real(8) :: time_sign !< sign for dt (>0 forward modelling, <0 backtrace)
   real(8), dimension(3):: foilNormal
+  integer:: lastFoilPosition !< Position of the last foil in the geometry collection
   real(8) :: incidentProjection
   ! --- FILDSIM mode
   real(8), dimension(:), allocatable::min_beta, delta_beta, marker_factor
@@ -281,7 +282,7 @@ module sinpa_module
   logical:: mapping = .True.!< flag to decide if we launch mapping markers
   logical:: signal = .False.!< flag to decide if we follow FIDASIM4 markers
   logical:: resampling = .False.!< flag to decide if we resample FIDASIM markers
-  integer:: nResampling = 1 !< Resample number for FIDASIM simulations
+  integer:: nResampling = 1, nResamplingAUX!< Resample number for FIDASIM simulations
   logical:: saveOrbits = .False.!< flag to decide if we save the orbits
   real(8):: saveRatio = 0.0d0!< Ratio of orbits to be saved
   logical:: saveOrbitLongMode = .False. !< Flag to save orbits in long or short format
@@ -1290,14 +1291,17 @@ contains
     type(marker), intent(inout):: particle
     integer::iloop, kk
     if (particle%kindOfCollision .eq. 1) then
-      ! We already collided with the foil, check just the scintillator, which is
-      ! supposed to be the last element of the geometry array
-      call triangleRay(geometry(nGeomElements)%triangleNum, geometry(nGeomElements)%triangles, &
-                       particle%position(:, kk), particle%position(:, kk + 1), &
-                       particle%collision, particle%collision_point)
-      if (particle%collision) then
-        particle%kindOfCollision = geometry(nGeomElements)%kind
-      endif
+      ! We already collided with the foil, just check the collimator after the
+      ! the foils and the scintillator
+      platesAfterFoil: do iloop=lastFoilPosition+1, nGeomElements
+        call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
+                         particle%position(:, kk), particle%position(:, kk + 1), &
+                         particle%collision, particle%collision_point)
+        if (particle%collision) then
+          particle%kindOfCollision = geometry(iloop)%kind
+          exit platesAfterFoil
+        endif
+      enddo platesAfterFoil
     else   ! We need to loop over all the plates
       plates: do iloop=1, nGeomElements
         call triangleRay(geometry(iloop)%triangleNum, geometry(iloop)%triangles, &
@@ -1533,9 +1537,11 @@ contains
       if (geometry(i)%kind .eq. 1) then
         call vec_product(geometry(i)%triangles(1, 1, :),  geometry(i)%triangles(1, 2, :), foilNormal)
         foilNormal = foilNormal / sqrt(sum(foilNormal**2))
+        lastFoilPosition = i
       elseif (geometry(i)%kind .eq. 2) then
         call vec_product(geometry(i)%triangles(1, 1, :),  geometry(i)%triangles(1, 2, :), ScintNormal)
         ScintNormal = ScintNormal / sqrt(sum(ScintNormal**2))
+        print*, 'ScintillatorNormal: ', ScintNormal
       endif
     enddo
     ! Ensure the scintillator to be the last element
@@ -1628,7 +1634,7 @@ contains
       print*, 'Using gc position'
     endif
     if (verbose) then
-      print*, F4Markers%counter, '*', nResampling, 'markers to be followed'
+      print*, F4Markers%counter, '*', max(dble(nResampling), 1.0d0), 'markers to be followed'
     endif
   end subroutine readFIDASIM4Markers
 
@@ -1724,6 +1730,7 @@ contains
    allocate(delta_beta(nXI))
 
    if (flag) then  ! The 'secure mode'
+     print*, 'Calculating beta'
      do jj=1, nXI
        if ((abs(pinhole%eta) .le. epsilon) .or. (abs(pinhole%eta-pi/2.0d0) .le. epsilon) )then
          ! Not efficient, I know, @todo
@@ -1765,9 +1772,11 @@ contains
        endif
      enddo
    else
+     print*, 'Not beta'
      min_beta(:) = minAngle  ! Save the input namelist default
      delta_beta(:) = dAngle
      marker_factor(:) = 1
+     print*, minAngle, dAngle
    endif
  end subroutine calculate_betas
 
@@ -1793,7 +1802,6 @@ contains
    type(marker), intent(in):: marker_to_save
    integer, intent(in):: step_to_save
    logical, intent(in):: long_flag
-
    write(fid) step_to_save
    write(fid) marker_to_save%rl
    write(fid) marker_to_save%xi
