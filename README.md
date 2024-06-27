@@ -5,7 +5,7 @@ This code was created as a synthetic INPA, although it was enhanced to have FILD
 Up to now, these python libraries are distributed together with the ScintillatorSuite (<https://github.com/JoseRuedaRueda/ScintSuite>). This ScintSuite will be open sourced soon
 
 ## Citation of the code
-To cite the code please use the FILDSIM DOI (DOI 10.5281/zenodo.12512086) flus the FILDSIM or INPASIM article, depending if you are running the code for FILD or for INPA:
+To cite the code please use the FILDSIM [![DOI](https://zenodo.org/badge/758880137.svg)](https://zenodo.org/doi/10.5281/zenodo.12512086) plus the FILDSIM or INPASIM article, depending if you are running the code for FILD or for INPA:
 - FILDSIM mode: J Galdon-Quiroga etal 2018 PlasmaPhys.Control.Fusion 60 105005
 - INPASIM mode: J Rueda-Rueda et al 2024 Plasma Phys. Control. Fusion 66 065025
 
