@@ -28,7 +28,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 4  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 5  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg

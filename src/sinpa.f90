@@ -523,6 +523,7 @@ program sinpa
     cWrong = 0
     cFoil = 0
     cInpingBack = 0
+    cOrb = 0
     ! --- Get the scale
     ! See the normalization factor for the weight
     normalization_resample = max(dble(nResampling), 1.0d0)

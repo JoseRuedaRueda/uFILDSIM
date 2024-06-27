@@ -1,3 +1,6 @@
+## 4.5 Bug fix
+- Solved bug: cOrb was not being clean from mapping to signal calculation, so the system thought that in the orbit signal file, both the mapping and signal orbit were saved so all crashed in python when loading
+
 ## 4.4 Bug fix
 - Solved bugs when tracing particles with negative charge
 - Solved bug in verbosing colliding elements
