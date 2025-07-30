@@ -46,7 +46,7 @@ sinpa:
 
 sinpa_debug:
 	cd $(SRC_DIR) && \
-	$(COMP) $(OPT) $(FFLAGS) $(MODULES:.f90=.o) $(TARGET) -o $(EXE)
+	$(COMP)  $(FFLAGS) $(MODULES:.f90=.o) $(TARGET) -o $(EXE)
 
 	mv $(SRC_DIR)*.o $(BIN_DIR)
 	mv $(SRC_DIR)*.mod $(BIN_DIR)

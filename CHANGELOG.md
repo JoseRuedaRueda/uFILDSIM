@@ -1,3 +1,12 @@
+## 4.8 Bug solved
+- Solved bug where pitch at ionization place was overwritting the ionization poin coordinates in the strike signal file
+
+## 4.7 Resampling updated
+- Resampling in signal works with rectangular pinholes
+
+## 4.6 FIDASIM USA
+- Compatibility with markers from FIDASIM USA version (via previous wrapper in python, not real h5 reading)
+
 ## 4.5 Bug fix
 - Solved bug: cOrb was not being clean from mapping to signal calculation, so the system thought that in the orbit signal file, both the mapping and signal orbit were saved so all crashed in python when loading
 
@@ -12,6 +21,7 @@
 
 ## 4.1 FIDASIM weight
 - Area normalization not applied, int FIDASIM markers, as the pinhole size is different in FIDASIM than in SINPA to speed up the simulation
+
 ## 4.0 Torwards interfaces
 - First step to move torwards interfaces and forget about dummy ifs
 - New strike file formats added

@@ -469,9 +469,13 @@ program sinpa
     if (FILDSIMmode) then
       print*, "sorry not implemented"
     else
-      call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin", verbose)
+      if (useFIDASIMUSA) then
+        call readFIDASIMUSAMarkers(trim(FIDASIMfolder)//"/npa.bin", verbose)
+      else
+        call readFIDASIM4Markers(trim(FIDASIMfolder)//"/npa.bin", verbose)
+      endif
     endif
-    ! --- Open the file to save the data
+      ! --- Open the file to save the data
     ! -- Strike points on the scintillator
     call writeStrikeFileHeader(trim(runFolder)//&
     '/results/'//trim(runID)//'.spsignal', 61, kindOfstrikeScintFile+100, .TRUE., dummy_shape)
@@ -544,9 +548,14 @@ program sinpa
         part%xi = 0.0
         ! - FIDASIM data
         part%velocity(:, 1) = F4Markers%v(:, i)
+        if (useFIDASIMUSA) then
+          part%ipitch = F4Markers%ipitch(i)
+        else
+          part%ipitch = 0.0d0
+        endif
         ! Resample the position:
         if (nResampling > 0) then
-          ! Resample the position (only valid for circular pinholes)
+          ! Resample the position
           if (pinhole%kind.eq.0) then
             pos1 = pinhole%r + pinhole%d1*(20.0d0*pinhole%u1 + 20.0d0*pinhole%u2)
             do while (sqrt(sum((pos1-pinhole%r)**2)) .gt.  pinhole%d1)
@@ -554,8 +563,9 @@ program sinpa
               pos1 = pinhole%r+ pinhole%d1*((-1+2*ran(2))*pinhole%u1+(-1+2*ran(3))*pinhole%u2)
             end do
           else
-            print*, 'Option not implemented'
-            stop
+            call random_number(ran)
+            pos1 = pinhole%r + 0.5*pinhole%d1 * (-1+2*ran(2))*pinhole%u1 + &
+            0.5*pinhole%d2 * (-1+2*ran(3))*pinhole%u2
           endif
           part%position(:, 1) = pos1
         else
@@ -628,7 +638,7 @@ program sinpa
         if (saveOrbits) then
           call random_number(rand_number)
           if (rand_number .lt. saveRatio) then
-            ! Save the collision point in the trajectory for future use
+            ! Save the orbit for future study
             cOrb = cOrb + 1
             call saveOrbit(63, part, part%n_t, saveOrbitLongMode)
           endif
@@ -662,7 +672,7 @@ program sinpa
       print*, 'Not colliding Neutrals', cWrongNeutral
       print*, 'Not colliding Ions', cWrongIons
       print*, 'hitting foil', cFoil
-      print*, 'hitting the collimator in the back', cInpingBack
+      print*, 'hitting the scintillator in the back', cInpingBack
     endif
     ! ---- Write the extra information
     ! Write time and shot number of the simulation
