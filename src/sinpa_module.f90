@@ -28,7 +28,7 @@ module sinpa_module
   ! PARAMETERS
   !----------------------------------------------------------------------------
   integer, parameter:: versionID1 = 4  !< ID version number, to identify ouput
-  integer, parameter:: versionID2 = 3  !< ID version 2, to identify the ouput
+  integer, parameter:: versionID2 = 8  !< ID version 2, to identify the ouput
   real (8), parameter:: pi = 3.141592653589793 !< pi
   real (8), parameter:: twopi = 6.283185307
   real (8), parameter:: amu_to_kg = 1.66054e-27 !< amu to kg
@@ -70,6 +70,7 @@ module sinpa_module
       real (8):: dt !< dt for the integration [s]
       integer::kindOfCollision ! With whom has collide
       real (8):: cosalpha_foil ! cos alpha inpinging in the INPA foil
+      real (8)::ipitch ! pitch at the FI CX position
 
   end type marker
 
@@ -85,6 +86,7 @@ module sinpa_module
         real(8), dimension(:, :), allocatable :: v !< marker velocity
         real(8), dimension(:), allocatable :: wght !< weight
         integer, dimension(:), allocatable :: kind !< kind, active, passive...
+        real(8), dimension(:), allocatable :: ipitch !< pitch at birth position
   end type FIDASIM
 
   ! type :: scatteringData
@@ -295,7 +297,7 @@ module sinpa_module
   logical:: save_collimator_strike_points = .false. !< Save the collimator strike points
   logical:: save_wrong_markers_position = .false.  !< Save the end position of the wrong markers
   logical:: save_scintillator_strike_points = .true. !< Save the scintillator strike points
-  integer:: kindOfstrikeScintFile = 1 !< Kind of output strike file
+  integer:: kindOfstrikeScintFile = 2 !< Kind of output strike file
   logical:: save_self_shadowing_collimator_strike_points = .false. !< Save the scintillator strike points
   logical:: backtrace = .false.!< flag to trace back the orbits
   logical:: restrict_mode = .false. !< flag to restrict the initial gyrophase
@@ -304,6 +306,8 @@ module sinpa_module
   integer:: FoilYieldModel = 0
   logical:: self_shadowing = .false.
   logical:: WeightCalculation = .false.
+  logical:: useFIDASIMUSA = .true.
+  logical:: midPlaneR = .false.
   ! Namelist
   NAMELIST /config/ runID, GeomFolder, nxi, &
     nGyroradius, nMap, n1, r1, mapping, FILDSIMmode, &
@@ -312,7 +316,7 @@ module sinpa_module
     backtrace,restrict_mode, FoilElossModel, ScintillatorYieldModel, FoilYieldModel, &
     save_wrong_markers_position, save_scintillator_strike_points, &
     kindOfstrikeScintFile, self_shadowing, &
-    save_self_shadowing_collimator_strike_points, WeightCalculation
+    save_self_shadowing_collimator_strike_points, WeightCalculation, useFIDASIMUSA, midPlaneR
 
   ! --- Input
   integer:: nGyro = 300 !< number of points in a complete gyrocicle of the particle
@@ -335,7 +339,7 @@ module sinpa_module
   ! --- Particle and foil parameters
   real(8), dimension(:), allocatable:: FoilElossParameters  !< Foil parameters
   real(8), dimension(:), allocatable:: ScintillatorYieldParameters  !< Scintillator parameters
-  real(8), dimension(:), allocatable:: FoilYieldParameters  !< Scintillator parameters
+  real(8), dimension(:), allocatable:: FoilYieldParameters  !< Foil yield parameters
   ! Namelist
   NAMELIST /markerinteractions/ FoilElossParameters, ScintillatorYieldParameters, FoilYieldParameters
 
@@ -1638,7 +1642,62 @@ contains
     endif
   end subroutine readFIDASIM4Markers
 
+  subroutine readFIDASIMUSAMarkers(filename, verbose)
+    ! -----------------------------------------------------------------------
+    ! Load a FIDASIM npa file
+    !> \brief Load markers from a FIDASIM simulation
+    ! Written by Jose Rueda
+    ! When executed, it set in the code workspace:
+    !   - F4Markers !< Structure with NPA data
+    !   - verbose !< flag to print some info
+    ! -----------------------------------------------------------------------
 
+    ! Dummy variables:
+    character(*), intent(in) :: filename !< Name of the file with the markers
+    logical, intent(in) :: verbose
+
+    ! Local variables:
+    real(4), dimension(:), allocatable:: dummy1D
+    real(4), dimension(:, :), allocatable:: dummy2D
+
+    if (verbose) then
+      print*, 'Reading markers info from: ', trim(filename)
+    endif
+    open(60, file=trim(filename), action='read',access='stream')
+    read(60) F4Markers%shot_number
+    read(60) F4Markers%time
+    read(60) F4Markers%nr_npa
+    read(60) F4Markers%counter
+    ! Read the initial position
+    allocate(dummy2D(F4Markers%counter, 3))
+    allocate(F4Markers%ipos(3, F4Markers%counter))
+    allocate(F4Markers%fpos(3, F4Markers%counter))
+    allocate(F4Markers%v(3, F4Markers%counter))
+    allocate(dummy1D(F4Markers%counter))
+    allocate(F4Markers%wght(F4Markers%counter))
+    allocate(F4Markers%kind(F4Markers%counter))
+    allocate(F4Markers%ipitch(F4Markers%counter))
+    read(60) dummy2D
+    F4Markers%ipos = transpose(dble(dummy2D)) / 100.0d0
+    read(60) dummy2D
+    F4Markers%fpos = transpose(dble(dummy2D)) / 100.0d0
+    read(60) dummy2D
+    F4Markers%v = transpose(dble(dummy2D)) / 100.0d0
+    read(60) dummy1D
+    F4Markers%wght = dble(dummy1D) !* pinhole%d1**2 * pi
+    read(60) dummy1D
+    F4Markers%kind = int(dummy1D)
+    if (WeightCalculation) then
+      read(60) dummy2D
+      F4Markers%ipos = transpose(dble(dummy2D)) / 100.0d0
+      print*, 'Using gc position'
+      read(60) dummy1D
+      F4Markers%ipitch = dble(dummy1D)
+    endif
+    if (verbose) then
+      print*, F4Markers%counter, '*', max(dble(nResampling), 1.0d0), 'markers to be followed'
+    endif
+  end subroutine readFIDASIMUSAMarkers
 !------------------------------------------------------------------------------
 ! SECTION 8: Initialization of markers
 !------------------------------------------------------------------------------
@@ -1839,12 +1898,12 @@ contains
     nCol = 14
     ! Set the pointers to the store functions
     savePartToStrike => savePartToStrikeFILD2
-   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.1)) then
+   elseif (.not.FILDSIMmode.and.((kindOfFile.lt.100))) then
     nCol = 19
     ! Set the pointers to the store functions
     savePartToStrike => savePartToStrikeINPA1
-   elseif (.not.FILDSIMmode.and.(kindOfFile.eq.101)) then
-      nCol = 22
+   elseif (.not.FILDSIMmode.and.(kindOfFile.gt.100)) then
+      nCol = 23
       ! Set the pointers to the store functions
       savePartToStrikeSignal => savePartToStrikeINPASignal1
    endif
@@ -1907,6 +1966,7 @@ contains
   ! Dummy variables
   type(marker), intent(in):: particle
   integer, intent(in) :: counter
+  real(8) :: tline
   Strike(1:3, cScintillator ) = part%collision_point ! f point
   Strike(4, cScintillator) = part%weight ! weight
   Strike(5, cScintillator) = part%beta ! Beta angle
@@ -1915,9 +1975,18 @@ contains
     MATMUL(rotation, part%collision_point - ps) ! f pos scint
   Strike(12, cScintillator) = &
     180/pi*acos(incidentProjection) ! incident angle
-  call minimumDistanceLines(part%position(:, 1), &
-    part%velocity(:, 1)/v0, nbi%p0,&
-    nbi%u, dMin, posMin)
+  if (midPlaneR) then
+    ! Do not use the minimum distance to the NBI but the point where the trayectory cross the plane z = 0
+    ! Particle velocity is  directed inwards!
+    tline = -part%position(3, 1)/part%velocity(3, 1)
+    posMin = part%position(:, 1) + tline*part%velocity(:, 1)
+    dMin = 0.0
+
+  else
+    call minimumDistanceLines(part%position(:, 1), &
+      part%velocity(:, 1)/v0, nbi%p0,&
+      nbi%u, dMin, posMin)
+  endif
   Strike(13:15,cScintillator) = posMin   ! Initial point (NBI)
   Strike(16:18,cScintillator) = part%velocity(:, 1)  ! Initial velocity
   Strike(19, cScintillator) = dMin ! Closer distance to NBI
@@ -1940,6 +2009,7 @@ contains
   Strike(18, cScintillator) = part%cosalpha_foil
   Strike(19, cScintillator) = F4Markers%wght(i) / normalization_resample
   Strike(20:22, cScintillator) = part%ionization_point 
+  Strike(23, cScintillator) = part%ipitch
  end subroutine savePartToStrikeINPASignal1
 !-----------------------------------------------------------------------------
 ! SECTION 10: Foil interaction
