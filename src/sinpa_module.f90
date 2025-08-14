@@ -1693,6 +1693,8 @@ contains
       print*, 'Using gc position'
       read(60) dummy1D
       F4Markers%ipitch = dble(dummy1D)
+    else
+      F4Markers%ipitch = 0.0d0
     endif
     if (verbose) then
       print*, F4Markers%counter, '*', max(dble(nResampling), 1.0d0), 'markers to be followed'
@@ -2054,7 +2056,8 @@ contains
      ! Get the incident angle (projection)
      cos_alpha = abs(localV(1)*normal(1) + localV(2)*normal(2) + localV(3)*normal(3))
      ! Scale the energy
-     deltaE = - FoilElossParameters(1) * FoilElossParameters(2)/cos_alpha * sqrt(MC_marker%energy0)
+     Energy = 0.5*modV**2*M/qe*amu_to_kg/1000.0
+     deltaE = - FoilElossParameters(1) * FoilElossParameters(2)/cos_alpha * sqrt(Energy)
      ! Scale the velocity
      MC_marker%velocity(:, step+1) = localV * sqrt(2 * (MC_marker%energy0 + deltaE)/(M/qe*amu_to_kg/1000.0))
      ! Save the cosalpha value
